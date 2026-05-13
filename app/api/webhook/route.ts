@@ -6,9 +6,11 @@ const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SE
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function POST(req: NextRequest) {
+  let from = ''; // Declare outside to use in catch block
+
   try {
     const formData = await req.formData();
-    const from = (formData.get('From') as string)?.replace('whatsapp:', '');
+    from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = formData.get('Body') as string || '';
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
@@ -49,7 +51,9 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error("Webhook Error:", error);
-    await sendMessage(from || '', "Sorry, something went wrong. Please try again.");
+    if (from) {
+      await sendMessage(from, "Sorry, something went wrong. Please try again.");
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
