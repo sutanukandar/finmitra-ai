@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import Anthropic from '@anthropic-ai/sdk';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!   // This should bypass RLS
-);
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function POST(req: NextRequest) {
   let from = '';
@@ -14,31 +13,43 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = formData.get('Body') as string || '';
 
-    console.log(`[DEBUG] Raw From: ${formData.get('From')}`);
-    console.log(`[DEBUG] Cleaned From: ${from}`);
+    if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
-    // Force bypass RLS with service_role
-    const { data: restaurant, error } = await supabase
+    // Find restaurant
+    const { data: restaurant } = await supabase
       .from('restaurants')
-      .select('*')
+      .select('id, name')
       .eq('mobile', from)
       .single();
 
-    console.log(`[DEBUG] Query Result:`, restaurant);
-    console.log(`[DEBUG] Query Error:`, error);
-
     if (!restaurant) {
-      await sendMessage(from, `Namaste! 👋\n\nDebug Info:\nSent: ${from}\nStored: +919886962078\n\nStill not found.`);
+      await sendMessage(from, "Namaste! This number is not registered with FinMitra yet.");
       return NextResponse.json({ success: true });
     }
 
-    await sendMessage(from, `✅ Hello ${restaurant.name || 'Owner'}!\nFinMitra is connected!\n\nTry: "swiggy 4500 aaj" or "aaj ka P&L"`);
+    // === Claude NLP Parsing ===
+    const systemPrompt = `You are FinMitra, a smart financial assistant for Indian restaurant owners. 
+    Today's date is ${new Date().toISOString().split('T')[0]}. Respond in natural Hinglish.
+    Understand casual messages like "swiggy 4500 aaj", "aaj ka P&L", "hyperpure 2400 kal", etc.`;
+
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 500,
+      system: systemPrompt,
+      messages: [{ role: "user", content: body }]
+    });
+
+    let reply = aiResponse.content[0].type === 'text' 
+      ? aiResponse.content[0].text 
+      : "✅ Message received!";
+
+    await sendMessage(from, reply);
 
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
     console.error("Error:", error);
-    if (from) await sendMessage(from, "Technical error occurred.");
+    if (from) await sendMessage(from, "Sorry, something went wrong. Please try again.");
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
