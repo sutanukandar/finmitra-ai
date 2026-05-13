@@ -25,22 +25,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Call Claude for intent parsing
+    // Claude NLP Call
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      system: "You are FinMitra, a helpful financial assistant for Indian restaurant owners. Respond in Hinglish.",
-      messages: [{ role: "user", content: `User said: ${body}` }]
+      max_tokens: 400,
+      system: `You are FinMitra, a helpful WhatsApp financial assistant for Indian restaurant owners. 
+      Respond in natural Hinglish. Keep replies short and friendly.`,
+      messages: [{ role: "user", content: body }]
     });
 
-    const reply = message.content[0].text || "✅ Message received!";
+    // Safe extraction of text response
+    let reply = "✅ Message received!";
+    if (message.content && message.content.length > 0) {
+      const firstBlock = message.content[0];
+      if (firstBlock.type === 'text') {
+        reply = firstBlock.text;
+      }
+    }
 
     await sendMessage(from, reply);
 
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error("Error:", error);
+    console.error("Webhook Error:", error);
     await sendMessage(from || '', "Sorry, something went wrong. Please try again.");
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
