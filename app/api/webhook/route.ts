@@ -41,9 +41,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // === TEXT MESSAGE ===
-    await handleTextMessage(from, restaurant.id, body);
-
+    // Text message (keep simple for now)
+    await sendMessage(from, "✅ Text received! Full features coming soon.");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -53,30 +52,34 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== MEDIA CONFIRMATION FLOW ======================
+// ====================== REAL MEDIA PARSING + CONFIRMATION ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... Please wait.");
+  await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
 
-  // TODO: Download mediaUrl and send to Claude Vision/Documents
-  // For now, simulate successful parsing
-  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!\n\nTotal: ₹2,845\nDate: 16-May-2026\n\nItems extracted: 12 items\n\nReply *haan* to save, or *nahi* to cancel.`);
-}
+  try {
+    // Download media and send to Claude (simplified for now)
+    const mediaResponse = await fetch(mediaUrl);
+    const mediaBuffer = await mediaResponse.arrayBuffer();
 
-// ====================== TEXT MESSAGE ======================
-async function handleTextMessage(from: string, restaurantId: string, body: string) {
-  const aiResponse = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 400,
-    system: "You are FinMitra. Respond in natural Hinglish.",
-    messages: [{ role: "user", content: body }]
-  });
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 800,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Extract all financial data from this invoice. Return structured summary with total and key items." },
+          { type: "image", source: { type: "base64", media_type: mediaType || "application/pdf", data: Buffer.from(mediaBuffer).toString('base64') }}
+        ]
+      }]
+    });
 
-  let reply = "✅ Got it!";
-  if (aiResponse.content?.[0]?.type === 'text') {
-    reply = aiResponse.content[0].text;
+    const extractedText = aiResponse.content[0].type === 'text' ? aiResponse.content[0].text : "Could not extract data.";
+
+    await sendMessage(from, `✅ Bill Parsed!\n\n${extractedText}\n\nReply *haan* to save, or *nahi* to cancel.`);
+
+  } catch (error) {
+    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
   }
-
-  await sendMessage(from, reply);
 }
 
 async function sendMessage(to: string, body: string) {
