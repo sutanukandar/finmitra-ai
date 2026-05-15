@@ -19,61 +19,71 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string) || '';
-    const mediaUrl = formData.get('MediaUrl0') as string | null;
-    const mediaType = formData.get('MediaContentType0') as string | null;
 
-    console.log(`[Webhook] 📥 From: ${from} | Body: ${body.substring(0, 100)}... | Media: ${mediaType || 'None'}`);
+    if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
-    if (!from) {
-      return NextResponse.json({ error: 'No sender' }, { status: 400 });
-    }
-
-    // Lookup restaurant
-    const { data: restaurant, error: lookupError } = await supabase
+    const { data: restaurant } = await supabase
       .from('restaurants')
-      .select('id, name, mobile, preferred_language')
+      .select('id, name')
       .eq('mobile', from)
       .single();
 
-    if (lookupError) console.error("[Webhook] Lookup error:", lookupError);
-
     if (!restaurant) {
-      await sendMessage(from, "Namaste! 👋\n\nThis number is not registered with FinMitra yet.\nPlease ask your founder to activate you.");
+      await sendMessage(from, "Namaste! 👋 This number is not registered with FinMitra yet.");
       return NextResponse.json({ success: true });
     }
 
-    console.log(`[Webhook] ✅ Restaurant: ${restaurant.name} | Lang: ${restaurant.preferred_language || 'Hinglish'}`);
-
-    // Basic Claude response for now
-    const systemPrompt = `You are FinMitra, a helpful financial assistant for Indian restaurant owners. Respond in natural Hinglish. Be short and friendly.`;
+    // Claude Structured Parsing
+    const systemPrompt = `You are FinMitra. Today's date is ${new Date().toISOString().split('T')[0]}.
+    Parse the user message and return ONLY valid JSON.
+    Supported intents: add_entries, query_today, query_mtd, query_lastmonth, help, unknown.
+    Categories: swiggy, phonepe, hyperpure, bigbasket, milk, bread, rent, electricity, gas, salary, fixed.
+    Return example: {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 4500, "date_offset": 0}]}`;
 
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 400,
+      max_tokens: 500,
       system: systemPrompt,
       messages: [{ role: "user", content: body }]
     });
 
     let reply = "✅ Got it!";
-    if (aiResponse.content?.[0]?.type === 'text') {
-      reply = aiResponse.content[0].text;
-    }
 
-    if (mediaUrl) {
-      reply = "📸 Media received! Full bill parsing with confirmation coming soon.";
+    try {
+      const jsonText = aiResponse.content[0].text;
+      const parsed = JSON.parse(jsonText);
+
+      if (parsed.intent === "add_entries" && parsed.entries) {
+        for (const entry of parsed.entries) {
+          const field = ['swiggy', 'phonepe'].includes(entry.category) ? entry.category : 
+                       (['hyperpure','bigbasket','milk','bread'].includes(entry.category) ? entry.category : 'fixed');
+
+          await supabase
+            .from('pnl_entries')
+            .upsert({
+              restaurant_id: restaurant.id,
+              date: new Date(Date.now() + (entry.date_offset || 0) * 86400000).toISOString().split('T')[0],
+              [field]: entry.amount || 0
+            }, { onConflict: 'restaurant_id,date' });
+        }
+        reply = `✅ Saved ${parsed.entries.length} entries successfully!`;
+      } else if (parsed.intent === "query_today") {
+        reply = "📊 Today's P&L feature coming in next phase.";
+      } else if (parsed.intent === "help") {
+        reply = "Try:\n• swiggy 4500 aaj\n• hyperpure 2400\n• aaj ka P&L\n• this month";
+      }
+    } catch (e) {
+      reply = "I understood your message! More features coming soon.";
     }
 
     await sendMessage(from, reply);
 
-    console.log(`[Webhook] ✅ Processed in ${Date.now() - startTime}ms`);
-
+    console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error("[Webhook] ❌ Error:", error);
-    if (from) {
-      await sendMessage(from, "Sorry, something went wrong. Please try again.");
-    }
+    console.error("Webhook Error:", error);
+    if (from) await sendMessage(from, "Sorry, something went wrong. Please try again.");
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
@@ -88,13 +98,5 @@ async function sendMessage(to: string, body: string) {
     from: 'whatsapp:+14155238886',
     to: `whatsapp:${to}`,
     body: body,
-  });
-}
-
-// For browser testing
-export async function GET() {
-  return NextResponse.json({ 
-    status: "✅ FinMitra Webhook Module is running",
-    message: "Send a WhatsApp message to test"
   });
 }
