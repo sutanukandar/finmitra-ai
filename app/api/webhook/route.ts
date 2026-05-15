@@ -22,13 +22,8 @@ export async function POST(req: NextRequest) {
     const mediaUrl = formData.get('MediaUrl0') as string | null;
     const mediaType = formData.get('MediaContentType0') as string | null;
 
-    console.log(`[Webhook] 📥 From: ${from} | Body: "${body.substring(0, 80)}${body.length > 80 ? '...' : ''}" | Media: ${mediaType || 'None'}`);
+    if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
-    if (!from) {
-      return NextResponse.json({ error: 'No sender' }, { status: 400 });
-    }
-
-    // Lookup restaurant
     const { data: restaurant } = await supabase
       .from('restaurants')
       .select('id, name')
@@ -36,72 +31,73 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!restaurant) {
-      await sendMessage(from, "Namaste! 👋\n\nThis number is not registered with FinMitra yet.\nPlease contact your founder to activate.");
+      await sendMessage(from, "Namaste! 👋 This number is not registered with FinMitra yet.");
       return NextResponse.json({ success: true });
     }
 
-    // === Media Upload Handling ===
+    // === MEDIA UPLOAD DETECTED ===
     if (mediaUrl) {
-      await sendMessage(from, `📸 ${mediaType?.includes('pdf') ? 'PDF' : 'Photo'} received!\n\nI'll show you the extracted data and ask for confirmation before saving.`);
-      // Full media confirmation flow will be added in next phase
+      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType, body);
       return NextResponse.json({ success: true });
     }
 
-    // === Text Message - Claude Parsing ===
-    const systemPrompt = `You are FinMitra, a smart financial assistant for Indian restaurant owners.
-Today's date is ${new Date().toISOString().split('T')[0]}.
-Respond in natural Hinglish. Be short, friendly and actionable.`;
+    // === TEXT MESSAGE ===
+    await handleTextMessage(from, restaurant.id, body);
 
-    const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 600,
-      system: systemPrompt,
-      messages: [{ role: "user", content: body }]
-    });
-
-    let reply = "✅ Got it!";
-
-    if (aiResponse.content?.[0]?.type === 'text') {
-      reply = aiResponse.content[0].text;
-    }
-
-    await sendMessage(from, reply);
-
-    console.log(`[Webhook] ✅ Completed in ${Date.now() - startTime}ms for ${restaurant.name}`);
-
+    console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error("[Webhook] ❌ Critical Error:", error.message);
-    if (from) {
-      await sendMessage(from, "Sorry, something went wrong. Please try again.");
-    }
+    console.error("[Webhook] Error:", error);
+    if (from) await sendMessage(from, "Sorry, something went wrong. Please try again.");
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// Helper Function
-async function sendMessage(to: string, body: string) {
-  try {
-    const twilio = require('twilio')(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+// ====================== MEDIA CONFIRMATION FLOW ======================
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null, body: string) {
+  await sendMessage(from, "📸 Processing your media... Please wait.");
 
-    await twilio.messages.create({
-      from: 'whatsapp:+14155238886',
-      to: `whatsapp:${to}`,
-      body: body,
-    });
-  } catch (err) {
-    console.error("[sendMessage] Failed:", err);
-  }
+  // TODO: Add actual parsing logic (Claude Vision / Documents / Whisper) in next step
+  // For now, simulate confirmation flow
+  await sendMessage(from, `✅ Media received!\n\nI have processed your upload.\n\nReply *haan* to save it, or *nahi* to cancel.`);
+  
+  // Store in pending_confirmations (placeholder)
+  await supabase.from('pending_confirmations').insert({
+    restaurant_id: restaurantId,
+    action: 'add_entries',
+    payload: { mediaUrl, mediaType, body },
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes TTL
+  });
 }
 
-// For testing in browser
-export async function GET() {
-  return NextResponse.json({ 
-    status: "✅ FinMitra Webhook Module is running (Production Ready Foundation)",
-    message: "Send WhatsApp messages to test"
+// ====================== TEXT MESSAGE HANDLER ======================
+async function handleTextMessage(from: string, restaurantId: string, body: string) {
+  const aiResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 500,
+    system: `You are FinMitra. Respond in natural Hinglish.`,
+    messages: [{ role: "user", content: body }]
+  });
+
+  let reply = "✅ Got it!";
+  if (aiResponse.content?.[0]?.type === 'text') {
+    reply = aiResponse.content[0].text;
+  }
+
+  await sendMessage(from, reply);
+}
+
+// Helper
+async function sendMessage(to: string, body: string) {
+  const twilio = require('twilio')(
+    process.env.TWILIO_ACCOUNT_SID,
+    process.env.TWILIO_AUTH_TOKEN
+  );
+
+  await twilio.messages.create({
+    from: 'whatsapp:+14155238886',
+    to: `whatsapp:${to}`,
+    body: body,
   });
 }
