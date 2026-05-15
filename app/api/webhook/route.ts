@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string) || '';
+    const mediaUrl = formData.get('MediaUrl0') as string | null;
+    const mediaType = formData.get('MediaContentType0') as string | null;
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -29,16 +31,23 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!restaurant) {
-      await sendMessage(from, "Namaste! 👋 This number is not registered with FinMitra yet.");
+      await sendMessage(from, "Namaste! This number is not registered with FinMitra yet.");
       return NextResponse.json({ success: true });
     }
 
-    // Claude Structured Parsing
+    // Media Upload → Ask for confirmation
+    if (mediaUrl) {
+      await sendMessage(from, "📸 Media received! Processing...\n\nI'll show you the extracted data and ask for confirmation before saving.");
+      // TODO: Full media handling in next phase
+      return NextResponse.json({ success: true });
+    }
+
+    // Text Message → Claude Parsing
     const systemPrompt = `You are FinMitra. Today's date is ${new Date().toISOString().split('T')[0]}.
-    Parse the user message and return ONLY valid JSON.
+    Parse user message and return ONLY valid JSON.
     Supported intents: add_entries, query_today, query_mtd, query_lastmonth, help, unknown.
     Categories: swiggy, phonepe, hyperpure, bigbasket, milk, bread, rent, electricity, gas, salary, fixed.
-    Return example: {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 4500, "date_offset": 0}]}`;
+    Example: {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 4500, "date_offset": 0}]}`;
 
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
@@ -66,14 +75,16 @@ export async function POST(req: NextRequest) {
               [field]: entry.amount || 0
             }, { onConflict: 'restaurant_id,date' });
         }
-        reply = `✅ Saved ${parsed.entries.length} entries successfully!`;
+        reply = `✅ Saved ${parsed.entries.length} entries!`;
       } else if (parsed.intent === "query_today") {
-        reply = "📊 Today's P&L feature coming in next phase.";
+        reply = "📊 Today's P&L coming in next phase.";
+      } else if (parsed.intent === "query_mtd") {
+        reply = "📅 This month's summary coming soon.";
       } else if (parsed.intent === "help") {
         reply = "Try:\n• swiggy 4500 aaj\n• hyperpure 2400\n• aaj ka P&L\n• this month";
       }
     } catch (e) {
-      reply = "I understood your message! More features coming soon.";
+      reply = "I understood your message! Try typing numbers with categories.";
     }
 
     await sendMessage(from, reply);
