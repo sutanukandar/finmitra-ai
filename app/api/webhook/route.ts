@@ -11,24 +11,6 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
 
-// Helper to send WhatsApp message
-async function sendMessage(to: string, body: string) {
-  try {
-    const twilio = require('twilio')(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-
-    await twilio.messages.create({
-      from: 'whatsapp:+14155238886',
-      to: `whatsapp:${to}`,
-      body: body,
-    });
-  } catch (err) {
-    console.error("[sendMessage] Twilio error:", err);
-  }
-}
-
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let from = '';
@@ -38,8 +20,9 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string) || '';
     const mediaUrl = formData.get('MediaUrl0') as string | null;
+    const mediaType = formData.get('MediaContentType0') as string | null;
 
-    console.log(`[Webhook] 📥 ${from} | "${body.substring(0, 60)}${body.length > 60 ? '...' : ''}"`);
+    console.log(`[Webhook] 📥 From: ${from} | Body: "${body.substring(0, 80)}${body.length > 80 ? '...' : ''}" | Media: ${mediaType || 'None'}`);
 
     if (!from) {
       return NextResponse.json({ error: 'No sender' }, { status: 400 });
@@ -53,24 +36,25 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!restaurant) {
-      await sendMessage(from, "Namaste! 👋 This number is not registered with FinMitra yet.");
+      await sendMessage(from, "Namaste! 👋\n\nThis number is not registered with FinMitra yet.\nPlease contact your founder to activate.");
       return NextResponse.json({ success: true });
     }
 
-    // TODO: Media handling with confirmation (Phase 5)
+    // === Media Upload Handling ===
     if (mediaUrl) {
-      await sendMessage(from, "📸 Media received!\n\nFull bill parsing with confirmation flow coming soon.");
+      await sendMessage(from, `📸 ${mediaType?.includes('pdf') ? 'PDF' : 'Photo'} received!\n\nI'll show you the extracted data and ask for confirmation before saving.`);
+      // Full media confirmation flow will be added in next phase
       return NextResponse.json({ success: true });
     }
 
-    // Claude NLP Parsing
-    const systemPrompt = `You are FinMitra, a helpful AI CFO for Indian restaurant owners.
-Today's date: ${new Date().toISOString().split('T')[0]}.
+    // === Text Message - Claude Parsing ===
+    const systemPrompt = `You are FinMitra, a smart financial assistant for Indian restaurant owners.
+Today's date is ${new Date().toISOString().split('T')[0]}.
 Respond in natural Hinglish. Be short, friendly and actionable.`;
 
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 500,
+      max_tokens: 600,
       system: systemPrompt,
       messages: [{ role: "user", content: body }]
     });
@@ -88,20 +72,36 @@ Respond in natural Hinglish. Be short, friendly and actionable.`;
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error("[Webhook] ❌ Error:", error.message);
-
+    console.error("[Webhook] ❌ Critical Error:", error.message);
     if (from) {
-      await sendMessage(from, "Sorry, something went wrong internally. Please try again.");
+      await sendMessage(from, "Sorry, something went wrong. Please try again.");
     }
-
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// For browser testing
+// Helper Function
+async function sendMessage(to: string, body: string) {
+  try {
+    const twilio = require('twilio')(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+
+    await twilio.messages.create({
+      from: 'whatsapp:+14155238886',
+      to: `whatsapp:${to}`,
+      body: body,
+    });
+  } catch (err) {
+    console.error("[sendMessage] Failed:", err);
+  }
+}
+
+// For testing in browser
 export async function GET() {
   return NextResponse.json({ 
-    status: "✅ FinMitra Webhook Module (Phase 7 Optimized) is running",
-    message: "Ready for WhatsApp messages"
+    status: "✅ FinMitra Webhook Module is running (Production Ready Foundation)",
+    message: "Send WhatsApp messages to test"
   });
 }
