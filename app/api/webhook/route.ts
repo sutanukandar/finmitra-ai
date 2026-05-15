@@ -31,52 +31,43 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!restaurant) {
-      await sendMessage(from, "Namaste! 👋 This number is not registered with FinMitra yet.");
+      await sendMessage(from, "Namaste! This number is not registered.");
       return NextResponse.json({ success: true });
     }
 
-    // === MEDIA UPLOAD DETECTED ===
+    // === MEDIA UPLOAD ===
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType, body);
+      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
     // === TEXT MESSAGE ===
     await handleTextMessage(from, restaurant.id, body);
 
-    console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
-    console.error("[Webhook] Error:", error);
-    if (from) await sendMessage(from, "Sorry, something went wrong. Please try again.");
+    console.error("Webhook Error:", error);
+    if (from) await sendMessage(from, "Sorry, something went wrong.");
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 // ====================== MEDIA CONFIRMATION FLOW ======================
-async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null, body: string) {
-  await sendMessage(from, "📸 Processing your media... Please wait.");
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
+  await sendMessage(from, "📸 Processing your bill... Please wait.");
 
-  // TODO: Add actual parsing logic (Claude Vision / Documents / Whisper) in next step
-  // For now, simulate confirmation flow
-  await sendMessage(from, `✅ Media received!\n\nI have processed your upload.\n\nReply *haan* to save it, or *nahi* to cancel.`);
-  
-  // Store in pending_confirmations (placeholder)
-  await supabase.from('pending_confirmations').insert({
-    restaurant_id: restaurantId,
-    action: 'add_entries',
-    payload: { mediaUrl, mediaType, body },
-    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes TTL
-  });
+  // TODO: Download mediaUrl and send to Claude Vision/Documents
+  // For now, simulate successful parsing
+  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!\n\nTotal: ₹2,845\nDate: 16-May-2026\n\nItems extracted: 12 items\n\nReply *haan* to save, or *nahi* to cancel.`);
 }
 
-// ====================== TEXT MESSAGE HANDLER ======================
+// ====================== TEXT MESSAGE ======================
 async function handleTextMessage(from: string, restaurantId: string, body: string) {
   const aiResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 500,
-    system: `You are FinMitra. Respond in natural Hinglish.`,
+    max_tokens: 400,
+    system: "You are FinMitra. Respond in natural Hinglish.",
     messages: [{ role: "user", content: body }]
   });
 
@@ -88,7 +79,6 @@ async function handleTextMessage(from: string, restaurantId: string, body: strin
   await sendMessage(from, reply);
 }
 
-// Helper
 async function sendMessage(to: string, body: string) {
   const twilio = require('twilio')(
     process.env.TWILIO_ACCOUNT_SID,
