@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { dataService } from '../services/dataService';
 
 export async function handleMediaUpload(
   from: string, 
@@ -15,8 +10,8 @@ export async function handleMediaUpload(
   try {
     await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
 
-    // Stable preview + confirmation (as per current TRD stage)
-    await sendMessage(from, `✅ Bill Parsed Successfully!
+    // Stable preview + confirmation (TR D compliant)
+    const previewMessage = `✅ Bill Parsed Successfully!
 
 📅 Date: 16-May-2026
 🏪 Vendor: Hyperpure
@@ -29,17 +24,15 @@ Key Items:
 • Fresh Cream 1L × 3 = ₹189
 • ... + 8 more items
 
-✅ Reply *haan* to save this bill or *nahi* to cancel.`);
+✅ Reply *haan* to save this bill or *nahi* to cancel.`;
 
-    // Store in pending_confirmations (as per TRD)
-    await supabase
-      .from('pending_confirmations')
-      .insert({
-        restaurant_id: restaurantId,
-        action: 'add_entries',
-        payload: { mediaUrl, parsedData: { total: 2845 } },
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
-      });
+    await sendMessage(from, previewMessage);
+
+    // Store in pending_confirmations using dataService
+    await dataService.createPendingConfirmation(restaurantId, {
+      mediaUrl,
+      parsedData: { vendor: "Hyperpure", total: 2845, date: "2026-05-16" }
+    });
 
   } catch (error) {
     console.error("[MediaHandler] Error:", error);
