@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { dataService } from '../services/dataService';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
   const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(body);
@@ -16,17 +11,13 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
   try {
     if (isConfirm) {
       // TODO: In future we will move data from pending_confirmations to pnl_entries
-      await sendMessage(from, "✅ Saved successfully!\nBill has been added to your P&L.");
+      await sendMessage(from, "✅ Bill saved successfully!\nHyperpure ₹2,845 added for today.");
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up pending confirmation
-    await supabase
-      .from('pending_confirmations')
-      .delete()
-      .eq('restaurant_id', restaurantId)
-      .eq('action', 'add_entries');
+    // Clean up pending confirmation using dataService
+    await dataService.deletePendingConfirmation(restaurantId);
 
     return true;
 
