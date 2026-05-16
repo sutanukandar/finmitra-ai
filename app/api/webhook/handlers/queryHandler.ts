@@ -1,41 +1,33 @@
-import { createClient } from '@supabase/supabase-js';
-import { PnlSummary } from '../types';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { dataService } from '../../../../lib/db/dataService';
 
 export async function handlePnlQuery(from: string, restaurantId: string, body: string) {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    let query = supabase
-      .from('pnl_entries')
-      .select('*')
-      .eq('restaurant_id', restaurantId)
-      .order('date', { ascending: true });
+    let startDate = today;
+    let endDate: string | undefined;
 
     if (body.includes('aaj') || body.includes('today') || body.includes('p&l')) {
-      query = query.eq('date', today);
+      startDate = today;
     } else if (body.includes('kal') || body.includes('yesterday')) {
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      query = query.eq('date', yesterday);
+      startDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     } else if (body.includes('this month') || body.includes('month')) {
-      const startOfMonth = today.slice(0, 7) + '-01';
-      query = query.gte('date', startOfMonth);
+      startDate = today.slice(0, 7) + '-01';
+      endDate = today;
     } else {
       await sendMessage(from, "Please specify period like `aaj ka P&L`, `this month`, or `kal ka P&L`");
       return;
     }
 
-    const { data: entries } = await query;
+    // Use centralized dataService
+    const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
 
-    if (!entries || entries.length === 0) {
+    if (error || !entries || entries.length === 0) {
       await sendMessage(from, "No data found for this period yet.");
       return;
     }
 
+    // Calculate P&L
     let revenue = 0, cogs = 0, fixed = 0;
 
     entries.forEach((e: any) => {
@@ -48,22 +40,13 @@ export async function handlePnlQuery(from: string, restaurantId: string, body: s
     const netProfit = grossProfit - fixed;
     const margin = revenue > 0 ? Math.round((grossProfit / revenue) * 100) : 0;
 
-    const summary: PnlSummary = {
-      revenue,
-      cogs,
-      grossProfit,
-      fixedCost: fixed,
-      netProfit,
-      margin
-    };
-
     const reply = `📊 *P&L Summary*
 
-Revenue     : ₹${summary.revenue.toLocaleString('en-IN')}
-COGS        : ₹${summary.cogs.toLocaleString('en-IN')}
-Gross Profit: ₹${summary.grossProfit.toLocaleString('en-IN')} (${summary.margin}%)
-Fixed Cost  : ₹${summary.fixedCost.toLocaleString('en-IN')}
-Net Profit  : ₹${summary.netProfit.toLocaleString('en-IN')}
+Revenue     : ₹${revenue.toLocaleString('en-IN')}
+COGS        : ₹${cogs.toLocaleString('en-IN')}
+Gross Profit: ₹${grossProfit.toLocaleString('en-IN')} (${margin}%)
+Fixed Cost  : ₹${fixed.toLocaleString('en-IN')}
+Net Profit  : ₹${netProfit.toLocaleString('en-IN')}
 
 Period: ${body.includes('month') ? 'This Month' : body.includes('kal') ? 'Yesterday' : 'Today'}`;
 
