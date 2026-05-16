@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { PnlSummary } from '../types';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -49,13 +50,22 @@ export async function handlePnlQuery(from: string, restaurantId: string, body: s
     const netProfit = grossProfit - fixed;
     const margin = revenue > 0 ? Math.round((grossProfit / revenue) * 100) : 0;
 
+    const summary: PnlSummary = {
+      revenue,
+      cogs,
+      grossProfit,
+      fixedCost: fixed,
+      netProfit,
+      margin
+    };
+
     const reply = `📊 *P&L Summary*
 
-Revenue     : ₹${revenue.toLocaleString('en-IN')}
-COGS        : ₹${cogs.toLocaleString('en-IN')}
-Gross Profit: ₹${grossProfit.toLocaleString('en-IN')} (${margin}%)
-Fixed Cost  : ₹${fixed.toLocaleString('en-IN')}
-Net Profit  : ₹${netProfit.toLocaleString('en-IN')}
+Revenue     : ₹${summary.revenue.toLocaleString('en-IN')}
+COGS        : ₹${summary.cogs.toLocaleString('en-IN')}
+Gross Profit: ₹${summary.grossProfit.toLocaleString('en-IN')} (${summary.margin}%)
+Fixed Cost  : ₹${summary.fixedCost.toLocaleString('en-IN')}
+Net Profit  : ₹${summary.netProfit.toLocaleString('en-IN')}
 
 Period: ${body.includes('month') ? 'This Month' : body.includes('kal') ? 'Yesterday' : 'Today'}`;
 
