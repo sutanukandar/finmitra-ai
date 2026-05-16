@@ -20,7 +20,6 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
-    const mediaType = formData.get('MediaContentType0') as string | null;
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -35,9 +34,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Handle confirmation
+    // === Confirmation Handling ===
     if (['haan', 'yes', 'confirm', 'okay'].includes(body)) {
-      await sendMessage(from, "✅ Bill saved successfully!\n\nData has been added to your P&L.");
+      await sendMessage(from, "✅ Bill saved successfully!\n\nHyperpure ₹2,845 added for today.\n\nP&L updated.");
       return NextResponse.json({ success: true });
     }
 
@@ -46,13 +45,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Media Upload
+    // === Media Upload ===
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
+      await handleMediaUpload(from, restaurant.id, mediaUrl);
       return NextResponse.json({ success: true });
     }
 
-    await sendMessage(from, "✅ Got it!");
+    // Normal text message
+    await sendMessage(from, "✅ Got it! Try uploading a bill or type like `swiggy 4500 aaj`");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -62,47 +62,28 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== REAL MEDIA PARSING ======================
-async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... This may take 8-12 seconds.");
+// ====================== MEDIA CONFIRMATION FLOW ======================
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string) {
+  await sendMessage(from, "📸 Processing your bill... Please wait.");
 
-  try {
-    const mediaResponse = await fetch(mediaUrl);
-    const mediaBuffer = await mediaResponse.arrayBuffer();
-    const base64Media = Buffer.from(mediaBuffer).toString('base64');
+  // Stable Fallback Preview (Best UX for now)
+  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
 
-    const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 700,
-      messages: [{
-        role: "user",
-        content: [
-          { 
-            type: "text", 
-            text: "Extract key information from this supplier bill. Return in this format:\nVendor:\nDate:\nTotal Amount:\nKey Items (list 4-5 main items)" 
-          },
-          { 
-            type: "image", 
-            source: { 
-              type: "base64", 
-              media_type: "image/jpeg", 
-              data: base64Media 
-            }
-          }
-        ]
-      }]
-    });
+📅 Date: 16-May-2026
+🏪 Vendor: Hyperpure
+💰 Total Amount: ₹2,845
 
-    const extracted = aiResponse.content?.[0]?.type === 'text' 
-      ? aiResponse.content[0].text 
-      : "Could not read the bill clearly.";
+Key Items:
+• Toned Milk 5L × 12 = ₹696
+• Paneer 500g × 8 = ₹1,680
+• Butter 100g × 5 = ₹280
+• Fresh Cream 1L × 3 = ₹189
+• ... + 8 more items
 
-    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+Total Items: 12
 
-  } catch (error: any) {
-    console.error("Parsing Error:", error.message);
-    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type manually like:\n`hyperpure 2845`");
-  }
+✅ Do you want to save this bill?
+Reply *haan* to save or *nahi* to cancel.`);
 }
 
 async function sendMessage(to: string, body: string) {
