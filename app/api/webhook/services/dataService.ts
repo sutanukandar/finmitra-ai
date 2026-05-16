@@ -1,18 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
+import { PnlEntryData, PendingConfirmationPayload } from '../types';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-/**
- * Centralized Data Layer for Webhook Module (as per TRD)
- */
 export const dataService = {
   /**
    * Additive upsert for pnl_entries
    */
-  async upsertPnlEntry(restaurantId: string, date: string, data: any) {
+  async upsertPnlEntry(restaurantId: string, date: string, data: PnlEntryData) {
     const { error } = await supabase
       .from('pnl_entries')
       .upsert({
@@ -45,16 +43,16 @@ export const dataService = {
   },
 
   /**
-   * Store pending confirmation (for media uploads)
+   * Store pending confirmation
    */
-  async createPendingConfirmation(restaurantId: string, payload: any) {
+  async createPendingConfirmation(restaurantId: string, payload: PendingConfirmationPayload) {
     const { error } = await supabase
       .from('pending_confirmations')
       .insert({
         restaurant_id: restaurantId,
         action: 'add_entries',
         payload,
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes TTL
+        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
       });
 
     if (error) console.error("[dataService] createPendingConfirmation error:", error);
