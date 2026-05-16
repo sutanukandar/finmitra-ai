@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Import handlers (we will create these one by one)
+// Import handlers (following TRD modular structure)
 import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Route to correct handler as per TRD
+    // Route to correct handler (as per TRD)
     if (mediaUrl) {
       await handleMediaUpload(from, restaurant.id, mediaUrl);
     } else {
