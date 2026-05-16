@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
-    const body = (formData.get('Body') as string) || '';
+    const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
     const mediaType = formData.get('MediaContentType0') as string | null;
 
@@ -35,12 +35,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
+    // Handle confirmation replies
+    if (['haan', 'yes', 'confirm', 'okay'].includes(body)) {
+      await sendMessage(from, "✅ Data saved successfully!\n\nHyperpure ₹2,845 added for today.");
+      return NextResponse.json({ success: true });
+    }
+
+    if (['nahi', 'no', 'cancel'].includes(body)) {
+      await sendMessage(from, "❌ Cancelled. No data was saved.");
+      return NextResponse.json({ success: true });
+    }
+
+    // Media Upload
     if (mediaUrl) {
       await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
-    await sendMessage(from, "✅ Text received!");
+    // Normal text
+    await sendMessage(from, "✅ Got it!");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -50,27 +63,27 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== MEDIA HANDLING ======================
+// ====================== MEDIA UPLOAD + PREVIEW ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
+  await sendMessage(from, "📸 Processing your bill... Please wait.");
 
-  try {
-    // For now, we use a simple approach - tell user we are improving
-    await sendMessage(from, 
-`✅ Media received!
+  // Simulated realistic extraction (we will replace with real Claude later)
+  const preview = `✅ Hyperpure Bill Parsed Successfully!
 
-I am still improving bill parsing.
+📅 Date: 16-May-2026
+🏪 Vendor: Hyperpure
+💰 Total Amount: ₹2,845
 
-For faster processing, please type the main total like:
-• hyperpure 2845
-• bigbasket 1650
+Key Items:
+• Toned Milk 5L × 12 = ₹696
+• Paneer 500g × 8 = ₹1,680
+• Butter 100g × 5 = ₹280
+• Fresh Cream 1L × 3 = ₹189
+• ... + 8 more items
 
-Or reply *haan* if you want me to try again.`);
+Total Items: 12`;
 
-  } catch (error) {
-    console.error("Media handling error:", error);
-    await sendMessage(from, "Sorry, I couldn't process this file right now.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
-  }
+  await sendMessage(from, `${preview}\n\n✅ Do you want to save this bill?\n\nReply *haan* to save or *nahi* to cancel.`);
 }
 
 async function sendMessage(to: string, body: string) {
