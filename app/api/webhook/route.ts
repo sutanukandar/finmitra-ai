@@ -52,50 +52,44 @@ export async function POST(req: NextRequest) {
 
 // ====================== MEDIA HANDLING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
+  await sendMessage(from, "📸 Processing your bill... This may take 5-10 seconds.");
 
   try {
+    // Download media
     const mediaResponse = await fetch(mediaUrl);
     const mediaBuffer = await mediaResponse.arrayBuffer();
     const base64Media = Buffer.from(mediaBuffer).toString('base64');
 
-    let content: any[] = [
-      { type: "text", text: "Extract all financial data from this document. Return vendor, date, total amount, and list key items." }
-    ];
-
-    // Handle PDF vs Image
-    if (mediaType?.includes('pdf')) {
-      content.push({
-        type: "document",
-        source: {
-          type: "base64",
-          media_type: "application/pdf",
-          data: base64Media
-        }
-      });
-    } else {
-      content.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: "image/jpeg",
-          data: base64Media
-        }
-      });
-    }
-
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 800,
-      messages: [{ role: "user", content }]
+      max_tokens: 700,
+      messages: [{
+        role: "user",
+        content: [
+          { 
+            type: "text", 
+            text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and main items with amounts. Be concise." 
+          },
+          { 
+            type: "image", 
+            source: { 
+              type: "base64", 
+              media_type: "image/jpeg", 
+              data: base64Media 
+            }
+          }
+        ]
+      }]
     });
 
-    const extracted = aiResponse.content[0].type === 'text' ? aiResponse.content[0].text : "Could not extract data.";
+    const extracted = aiResponse.content?.[0]?.type === 'text' 
+      ? aiResponse.content[0].text 
+      : "Could not read the bill.";
 
-    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save this bill, or *nahi* to cancel.`);
+    await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${extracted}\n\nReply *haan* to save, or *nahi* to cancel.`);
 
-  } catch (error) {
-    console.error("Media parsing error:", error);
+  } catch (error: any) {
+    console.error("Media Parse Error:", error.message);
     await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
   }
 }
