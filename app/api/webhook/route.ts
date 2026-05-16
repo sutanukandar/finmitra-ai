@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Import handlers (following TRD modular structure)
+// Import handlers (as per TRD modular structure)
 import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
+import { handleConfirmation } from './handlers/confirmationHandler';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -33,12 +34,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Route to correct handler (as per TRD)
+    // 1. Check for confirmation replies first (haan / nahi)
+    const isConfirmationHandled = await handleConfirmation(from, restaurant.id, body);
+    if (isConfirmationHandled) {
+      console.log(`[Webhook] Confirmation handled in ${Date.now() - startTime}ms`);
+      return NextResponse.json({ success: true });
+    }
+
+    // 2. Media Upload
     if (mediaUrl) {
       await handleMediaUpload(from, restaurant.id, mediaUrl);
-    } else {
-      await handleTextMessage(from, restaurant.id, body);
+      return NextResponse.json({ success: true });
     }
+
+    // 3. Normal Text Message
+    await handleTextMessage(from, restaurant.id, body);
 
     console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);
     return NextResponse.json({ success: true });
