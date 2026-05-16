@@ -1,5 +1,6 @@
 import { parser } from '../parser';
 import { dataService } from '../services/dataService';
+import { MediaParseResult } from '../types';
 
 export async function handleMediaUpload(
   from: string, 
@@ -12,10 +13,10 @@ export async function handleMediaUpload(
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
     // Use centralized parser
-    const parseResult = await parser.parseMedia(mediaUrl, null);
+    const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, null);
 
-    if (parseResult.success) {
-      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.message}\n\nReply *haan* to save or *nahi* to cancel.`);
+    if (parseResult.success && parseResult.extracted) {
+      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
     } else {
       // Fallback preview (stable UX)
       await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
