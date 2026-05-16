@@ -20,9 +20,6 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
-    const mediaType = formData.get('MediaContentType0') as string | null;
-
-    console.log(`[Webhook] 📥 From: ${from} | Media: ${mediaType} | URL: ${mediaUrl ? 'Yes' : 'No'}`);
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -38,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
+      await handleMediaUpload(from, restaurant.id, mediaUrl);
       return NextResponse.json({ success: true });
     }
 
@@ -52,32 +49,24 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== REAL PARSING WITH DETAILED LOGGING ======================
-async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  console.log(`[Media] Starting processing for ${restaurantId}. Type: ${mediaType}`);
+// ====================== DETAILED REAL PARSING ======================
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string) {
+  console.log(`[Media] Starting for ${restaurantId}. URL: ${mediaUrl}`);
 
   await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
   try {
-    // Download from Twilio
-    console.log(`[Media] Downloading from Twilio: ${mediaUrl}`);
+    // Download
+    console.log(`[Media] Downloading file...`);
     const response = await fetch(mediaUrl);
     const buffer = await response.arrayBuffer();
-    console.log(`[Media] Downloaded size: ${buffer.byteLength} bytes`);
+    console.log(`[Media] Downloaded size: ${(buffer.byteLength / 1024).toFixed(1)} KB`);
 
-    // Upload to Supabase Storage
-    const fileName = `${restaurantId}/${Date.now()}.jpg`;
-    console.log(`[Media] Uploading to Supabase as: ${fileName}`);
+    // Convert to base64
+    const base64Data = Buffer.from(buffer).toString('base64');
+    console.log(`[Media] Base64 length: ${base64Data.length} characters`);
 
-    await supabase.storage.from('bills').upload(fileName, buffer, {
-      contentType: 'image/jpeg',
-      upsert: true
-    });
-
-    const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(fileName);
-    console.log(`[Media] Public URL: ${publicUrl}`);
-
-    // Send to Claude
+    // Send to Claude using base64
     console.log(`[Media] Sending to Claude...`);
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
@@ -85,13 +74,20 @@ async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: s
       messages: [{
         role: "user",
         content: [
-          { type: "text", text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and main items." },
-          { type: "image", source: { type: "url", url: publicUrl } }
+          { type: "text", text: "This is a supplier bill. Extract: Vendor, Date, Total Amount, and main items." },
+          { 
+            type: "image", 
+            source: { 
+              type: "base64", 
+              media_type: "image/jpeg", 
+              data: base64Data 
+            }
+          }
         ]
       }]
     });
 
-    console.log(`[Media] Claude response received successfully`);
+    console.log(`[Media] Claude Success!`);
 
     const extracted = aiResponse.content?.[0]?.type === 'text' 
       ? aiResponse.content[0].text 
@@ -100,10 +96,10 @@ async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: s
     await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
 
   } catch (error: any) {
-    console.error("[Media] Parsing Failed:", {
+    console.error("[Media] FAILED:", {
       message: error.message,
       status: error.status,
-      requestId: error.requestId || 'N/A'
+      fullError: error
     });
 
     await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually for now.\nExample: `hyperpure 2845`");
