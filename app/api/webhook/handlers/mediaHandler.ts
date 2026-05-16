@@ -5,20 +5,22 @@ import { MediaParseResult } from '../types';
 export async function handleMediaUpload(
   from: string, 
   restaurantId: string, 
-  mediaUrl: string
+  mediaUrl: string,
+  mediaType: string | null = null
 ) {
-  console.log(`[MediaHandler] Processing media for ${restaurantId}`);
+  console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType}`);
 
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Use centralized parser
-    const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, null);
+    // Use centralized AI Parser (as per TRD)
+    const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, mediaType);
 
     if (parseResult.success && parseResult.extracted) {
-      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
+      // Show real parsed data + confirmation
+      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
     } else {
-      // Stable fallback preview
+      // Fallback preview (stable UX)
       await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
 
 📅 Date: 16-May-2026
