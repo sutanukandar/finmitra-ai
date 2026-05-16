@@ -1,26 +1,45 @@
-import { handlePnlQuery } from './queryHandler';
+import { parser } from '../parser';
 import { dataService } from '../services/dataService';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   try {
-    // Full P&L Queries
-    if (body.includes('aaj') || body.includes('today') || body.includes('p&l')) {
-      await handlePnlQuery(from, restaurantId, 'today');
-      return;
-    }
+    const todayDate = new Date().toISOString().split('T')[0];
 
-    if (body.includes('this month') || body.includes('month')) {
-      await handlePnlQuery(from, restaurantId, 'month');
-      return;
-    }
+    // Use centralized parser (TR D compliant)
+    const parsed = await parser.parseTextMessage(body, todayDate);
 
-    if (body.includes('kal') || body.includes('yesterday')) {
-      await handlePnlQuery(from, restaurantId, 'yesterday');
-      return;
-    }
+    if (parsed.intent === "add_entries" && parsed.entries) {
+      // Save entries using dataService
+      for (const entry of parsed.entries) {
+        const fieldMap: any = {
+          swiggy: 'swiggy',
+          phonepe: 'phonepe',
+          hyperpure: 'hyperpure',
+          bigbasket: 'bigbasket',
+          milk: 'milk',
+          bread: 'bread',
+          rent: 'rent',
+          electricity: 'electricity',
+          gas: 'gas',
+          salary: 'salary',
+          fixed: 'fixed'
+        };
 
-    // Default response
-    await sendMessage(from, "✅ Got it!\nTry:\n• `aaj ka P&L`\n• `this month`\n• `swiggy 4500 aaj`");
+        const field = fieldMap[entry.category] || 'fixed';
+
+        await dataService.upsertPnlEntry(restaurantId, todayDate, {
+          [field]: entry.amount || 0
+        });
+      }
+
+      await sendMessage(from, `✅ Saved ${parsed.entries.length} entries successfully!`);
+
+    } else if (parsed.intent === "query_today" || parsed.intent === "query_mtd") {
+      // Forward to query handler
+      await import('./queryHandler').then(m => m.handlePnlQuery(from, restaurantId, body));
+    } else {
+      await sendMessage(from, "✅ Got it!\nTry:\n• `aaj ka P&L`\n• `this month`\n• `swiggy 4500 aaj`");
+    }
 
   } catch (error) {
     console.error("[TextHandler] Error:", error);
