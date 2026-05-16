@@ -1,18 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { ParsedIntent, MediaParseResult } from './types';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
 
-/**
- * AI Parser (as per TRD - AI Processing Module)
- * Central place for all Claude calls
- */
 export const parser = {
   /**
    * Parse text message for intent and structured data
    */
-  async parseTextMessage(message: string, todayDate: string) {
+  async parseTextMessage(message: string, todayDate: string): Promise<ParsedIntent> {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON.
 Supported intents: add_entries, query_today, query_mtd, query_lastmonth, help, unknown.
@@ -33,7 +30,7 @@ Example output:
         ? aiResponse.content[0].text 
         : '{}';
 
-      return JSON.parse(text);
+      return JSON.parse(text) as ParsedIntent;
     } catch (error) {
       console.error("[Parser] Text parsing failed:", error);
       return { intent: "unknown" };
@@ -41,9 +38,9 @@ Example output:
   },
 
   /**
-   * Future: Parse media (photo/PDF) using Claude Vision
+   * Parse media (photo/PDF) using Claude Vision
    */
-  async parseMedia(mediaUrl: string, mediaType: string | null) {
+  async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     // TODO: Implement real Vision parsing later
     console.log(`[Parser] Media parsing requested for ${mediaType}`);
     return {
