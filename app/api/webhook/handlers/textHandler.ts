@@ -1,12 +1,12 @@
 import { parser } from '../parser';
-import { dataService } from '../services/dataService';
+import { dataService } from '../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   try {
     const todayDate = new Date().toISOString().split('T')[0];
 
-    // Use centralized parser (as per TRD)
+    // Use centralized parser
     const parsed: ParsedIntent = await parser.parseTextMessage(body, todayDate);
 
     if (parsed.intent === "add_entries" && parsed.entries) {
@@ -27,6 +27,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
         const field = fieldMap[entry.category] || 'fixed';
 
+        // Use centralized dataService
         await dataService.upsertPnlEntry(restaurantId, todayDate, {
           [field]: entry.amount || 0
         });
