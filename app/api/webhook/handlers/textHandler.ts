@@ -1,15 +1,15 @@
 import { parser } from '../parser';
 import { dataService } from '../services/dataService';
+import { ParsedIntent } from '../types';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   try {
     const todayDate = new Date().toISOString().split('T')[0];
 
-    // Use centralized parser (TR D compliant)
-    const parsed = await parser.parseTextMessage(body, todayDate);
+    // Use centralized parser (as per TRD)
+    const parsed: ParsedIntent = await parser.parseTextMessage(body, todayDate);
 
     if (parsed.intent === "add_entries" && parsed.entries) {
-      // Save entries using dataService
       for (const entry of parsed.entries) {
         const fieldMap: any = {
           swiggy: 'swiggy',
@@ -33,11 +33,11 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       }
 
       await sendMessage(from, `✅ Saved ${parsed.entries.length} entries successfully!`);
-
-    } else if (parsed.intent === "query_today" || parsed.intent === "query_mtd") {
-      // Forward to query handler
+    } 
+    else if (parsed.intent === "query_today" || parsed.intent === "query_mtd") {
       await import('./queryHandler').then(m => m.handlePnlQuery(from, restaurantId, body));
-    } else {
+    } 
+    else {
       await sendMessage(from, "✅ Got it!\nTry:\n• `aaj ka P&L`\n• `this month`\n• `swiggy 4500 aaj`");
     }
 
