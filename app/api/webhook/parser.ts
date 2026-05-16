@@ -42,10 +42,11 @@ Example output:
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     // TODO: Implement real Vision parsing later
-    console.log(`[Parser] Media parsing requested for ${mediaType}`);
+    console.log(`[Parser] Media parsing requested for ${mediaType || 'unknown'}`);
+    
     return {
       success: false,
-      message: "Media parsing not implemented yet"
+      extracted: "Media parsing not implemented yet"
     };
   }
 };
