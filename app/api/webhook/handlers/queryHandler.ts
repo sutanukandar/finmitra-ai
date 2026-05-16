@@ -16,7 +16,6 @@ export async function handlePnlQuery(from: string, restaurantId: string, body: s
       .eq('restaurant_id', restaurantId)
       .order('date', { ascending: true });
 
-    // Determine query period
     if (body.includes('aaj') || body.includes('today') || body.includes('p&l')) {
       query = query.eq('date', today);
     } else if (body.includes('kal') || body.includes('yesterday')) {
@@ -37,7 +36,6 @@ export async function handlePnlQuery(from: string, restaurantId: string, body: s
       return;
     }
 
-    // Calculate P&L
     let revenue = 0, cogs = 0, fixed = 0;
 
     entries.forEach((e: any) => {
