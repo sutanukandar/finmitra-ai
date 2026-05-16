@@ -1,104 +1,135 @@
-'use client';
+"use client";
 
 import { useState } from 'react';
 
 export default function BackfillWizard() {
-  const [step, setStep] = useState(1);
-  const [restaurant, setRestaurant] = useState({
-    name: '',
-    owner_name: '',
-    city: '',
-    mobile: ''
-  });
+  const [restaurantId, setRestaurantId] = useState(""); // You can make this dynamic later
+  const [entries, setEntries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
-  // Last 60 days daily data
-  const [dailyData, setDailyData] = useState<Record<string, any>>({});
-
-  const today = new Date();
-  const days = Array.from({ length: 60 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    return date.toISOString().split('T')[0];
-  });
-
-  const updateDailyData = (date: string, field: string, value: number) => {
-    setDailyData(prev => ({
-      ...prev,
-      [date]: {
-        ...prev[date],
-        [field]: value
-      }
-    }));
+  // Add a new day row
+  const addDay = () => {
+    setEntries([...entries, {
+      date: "",
+      swiggy: 0,
+      phonepe: 0,
+      hyperpure: 0,
+      bigbasket: 0,
+      milk: 0,
+      bread: 0,
+      rent: 0,
+      electricity: 0,
+      gas: 0,
+      salary: 0,
+      fixed: 0,
+      items: []
+    }]);
   };
 
-  const handleActivate = async () => {
-    const payload = {
-      restaurant,
-      dailyData,
-      source: "manual_backfill"
-    };
+  // Update aggregated field
+  const updateField = (index: number, field: string, value: any) => {
+    const newEntries = [...entries];
+    newEntries[index][field] = value;
+    setEntries(newEntries);
+  };
 
-    alert(`✅ Backfill data prepared for ${restaurant.name}!\n\n${Object.keys(dailyData).length} days of data ready to save.\n\n(In next version this will call the backend API)`);
-    console.log("Backfill Payload:", payload);
+  // Submit backfill
+  const handleSubmit = async () => {
+    if (!restaurantId) {
+      setMessage("Please enter Restaurant ID");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch('/api/backfill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurant_id: restaurantId,
+          entries: entries
+        })
+      });
+
+      const result = await res.json();
+
+      if (result.success) {
+        setMessage(`✅ Successfully backfilled ${result.results.length} days!`);
+        // Optionally clear form
+      } else {
+        setMessage(`❌ Error: ${result.error}`);
+      }
+    } catch (err) {
+      setMessage("Failed to connect to server");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-2xl p-10">
-        <h1 className="text-4xl font-bold text-center mb-2">FinMitra — Founder Backfill Wizard</h1>
-        <p className="text-center text-gray-600 mb-10">Step-by-step onboarding with daily data entry</p>
+    <div className="p-6 max-w-6xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Backfill Wizard</h1>
 
-        {step === 1 && (
-          <div>
-            <h2 className="text-2xl mb-6">Step 1: Restaurant Details</h2>
-            <div className="grid grid-cols-2 gap-6">
-              <input type="text" placeholder="Restaurant Name *" className="p-4 border rounded-xl" 
-                onChange={(e) => setRestaurant({...restaurant, name: e.target.value})} />
-              <input type="text" placeholder="Owner Name" className="p-4 border rounded-xl" 
-                onChange={(e) => setRestaurant({...restaurant, owner_name: e.target.value})} />
-              <input type="text" placeholder="City" className="p-4 border rounded-xl" 
-                onChange={(e) => setRestaurant({...restaurant, city: e.target.value})} />
-              <input type="text" placeholder="Mobile (+91...)" className="p-4 border rounded-xl" 
-                onChange={(e) => setRestaurant({...restaurant, mobile: e.target.value})} />
-            </div>
-            <button onClick={() => setStep(2)} className="mt-8 bg-blue-600 text-white px-12 py-4 rounded-xl text-lg w-full">
-              Next → Enter Daily Data
-            </button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div>
-            <h2 className="text-2xl mb-6">Step 2: Enter Daily Data (Last 60 Days)</h2>
-            <p className="text-red-600 mb-6">Fill whatever data you have. Leave blank for days with no data.</p>
-
-            <div className="max-h-[600px] overflow-auto border rounded-xl p-4 bg-gray-50">
-              {days.map(date => (
-                <div key={date} className="grid grid-cols-7 gap-3 mb-6 p-4 bg-white rounded-lg border">
-                  <div className="col-span-7 font-medium text-gray-700">{new Date(date).toLocaleDateString('en-IN', {weekday:'short', day:'numeric', month:'short'})}</div>
-                  
-                  <input type="number" placeholder="Swiggy" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'swiggy', Number(e.target.value))} />
-                  <input type="number" placeholder="PhonePe" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'phonepe', Number(e.target.value))} />
-                  <input type="number" placeholder="Hyperpure" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'hyperpure', Number(e.target.value))} />
-                  <input type="number" placeholder="BigBasket" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'bigbasket', Number(e.target.value))} />
-                  <input type="number" placeholder="Milk+Bread" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'milk', Number(e.target.value))} />
-                  <input type="number" placeholder="Fixed (Rent etc)" className="p-3 border rounded" 
-                    onChange={(e) => updateDailyData(date, 'fixed', Number(e.target.value))} />
-                </div>
-              ))}
-            </div>
-
-            <button onClick={handleActivate} className="mt-8 bg-green-600 hover:bg-green-700 text-white px-12 py-5 rounded-2xl text-xl w-full font-semibold">
-              Activate Restaurant & Save All Daily Data
-            </button>
-          </div>
-        )}
+      <div className="mb-6">
+        <label className="block text-sm font-medium mb-2">Restaurant ID</label>
+        <input
+          type="text"
+          value={restaurantId}
+          onChange={(e) => setRestaurantId(e.target.value)}
+          className="border p-3 w-full rounded-lg"
+          placeholder="Enter restaurant UUID"
+        />
       </div>
+
+      <button
+        onClick={addDay}
+        className="bg-blue-600 text-white px-6 py-3 rounded-lg mb-6"
+      >
+        + Add New Day
+      </button>
+
+      <div className="space-y-8">
+        {entries.map((entry, index) => (
+          <div key={index} className="border p-6 rounded-xl bg-gray-50">
+            <input
+              type="date"
+              value={entry.date}
+              onChange={(e) => updateField(index, 'date', e.target.value)}
+              className="border p-3 rounded-lg mb-4"
+            />
+
+            {/* Aggregated Totals */}
+            <div className="grid grid-cols-6 gap-4 mb-6">
+              <input type="number" placeholder="Swiggy" value={entry.swiggy} onChange={(e) => updateField(index, 'swiggy', Number(e.target.value))} className="border p-3 rounded-lg" />
+              <input type="number" placeholder="PhonePe" value={entry.phonepe} onChange={(e) => updateField(index, 'phonepe', Number(e.target.value))} className="border p-3 rounded-lg" />
+              <input type="number" placeholder="Hyperpure" value={entry.hyperpure} onChange={(e) => updateField(index, 'hyperpure', Number(e.target.value))} className="border p-3 rounded-lg" />
+              <input type="number" placeholder="Bigbasket" value={entry.bigbasket} onChange={(e) => updateField(index, 'bigbasket', Number(e.target.value))} className="border p-3 rounded-lg" />
+              <input type="number" placeholder="Milk" value={entry.milk} onChange={(e) => updateField(index, 'milk', Number(e.target.value))} className="border p-3 rounded-lg" />
+              <input type="number" placeholder="Bread" value={entry.bread} onChange={(e) => updateField(index, 'bread', Number(e.target.value))} className="border p-3 rounded-lg" />
+            </div>
+
+            {/* Item Level - Future enhancement */}
+            <p className="text-sm text-gray-500">Item-level data support coming soon in this UI.</p>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={handleSubmit}
+        disabled={loading}
+        className="mt-8 bg-green-600 text-white px-8 py-4 rounded-xl text-lg font-semibold disabled:bg-gray-400"
+      >
+        {loading ? "Saving..." : "Save All Data"}
+      </button>
+
+      {message && (
+        <div className="mt-6 p-4 bg-gray-100 rounded-lg">
+          {message}
+        </div>
+      )}
     </div>
   );
 }
