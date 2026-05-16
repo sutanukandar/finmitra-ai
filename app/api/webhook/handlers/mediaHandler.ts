@@ -1,5 +1,5 @@
 import { parser } from '../parser';
-import { dataService } from '../services/dataService';
+import { dataService } from '../../../../lib/db/dataService';
 import { MediaParseResult } from '../types';
 
 export async function handleMediaUpload(
@@ -12,7 +12,7 @@ export async function handleMediaUpload(
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Use centralized parser (as per TRD)
+    // Use centralized parser
     const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, null);
 
     if (parseResult.success && parseResult.extracted) {
@@ -35,7 +35,7 @@ Key Items:
 ✅ Reply *haan* to save this bill or *nahi* to cancel.`);
     }
 
-    // Store in pending_confirmations using dataService
+    // Store in pending_confirmations using centralized dataService
     await dataService.createPendingConfirmation(restaurantId, parseResult);
 
   } catch (error) {
