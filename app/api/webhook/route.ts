@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Import handlers (as per TRD modular structure)
+// Import all handlers (as per TRD modular structure)
 import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 import { handleConfirmation } from './handlers/confirmationHandler';
@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // 1. Check for confirmation replies first (haan / nahi)
-    const isConfirmationHandled = await handleConfirmation(from, restaurant.id, body);
-    if (isConfirmationHandled) {
+    // 1. Check for confirmation replies first (haan / nahi / yes / no)
+    const confirmationHandled = await handleConfirmation(from, restaurant.id, body);
+    if (confirmationHandled) {
       console.log(`[Webhook] Confirmation handled in ${Date.now() - startTime}ms`);
       return NextResponse.json({ success: true });
     }
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // 3. Normal Text Message
+    // 3. Normal Text Message (P&L queries, etc.)
     await handleTextMessage(from, restaurant.id, body);
 
     console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);
