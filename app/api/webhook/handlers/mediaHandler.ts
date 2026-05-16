@@ -12,13 +12,13 @@ export async function handleMediaUpload(
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Use centralized parser
+    // Use centralized parser (as per TRD)
     const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, null);
 
     if (parseResult.success && parseResult.extracted) {
       await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
     } else {
-      // Fallback preview (stable UX)
+      // Stable fallback preview
       await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
 
 📅 Date: 16-May-2026
@@ -35,7 +35,7 @@ Key Items:
 ✅ Reply *haan* to save this bill or *nahi* to cancel.`);
     }
 
-    // Store in pending_confirmations
+    // Store in pending_confirmations using dataService
     await dataService.createPendingConfirmation(restaurantId, parseResult);
 
   } catch (error) {
