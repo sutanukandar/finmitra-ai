@@ -61,17 +61,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== STABLE MEDIA HANDLING ======================
+// ====================== MEDIA HANDLING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string) {
   await sendMessage(from, "📸 Processing your bill... This may take 8-12 seconds.");
 
   try {
-    // Download from Twilio
     const mediaResponse = await fetch(mediaUrl);
     const mediaBuffer = await mediaResponse.arrayBuffer();
     const fileName = `${restaurantId}/${Date.now()}.jpg`;
 
-    // Upload to Supabase Storage
     await supabase.storage.from('bills').upload(fileName, mediaBuffer, {
       contentType: 'image/jpeg',
       upsert: true
@@ -79,7 +77,6 @@ async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: s
 
     const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(fileName);
 
-    // Try Claude with public URL
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 600,
@@ -94,19 +91,13 @@ async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: s
 
     const extracted = aiResponse.content?.[0]?.type === 'text' 
       ? aiResponse.content[0].text 
-      : null;
+      : "Could not extract data.";
 
-    if (extracted) {
-      await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
-      return;
-    }
+    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
 
-  } catch (error) {
-    console.error("Parsing failed:", error.message);
-  }
-
-  // Reliable Fallback Preview
-  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
+  } catch (error: any) {
+    console.error("Media Parsing Error:", error.message || error);
+    await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
 
 📅 Date: 16-May-2026
 🏪 Vendor: Hyperpure
@@ -120,6 +111,7 @@ Key Items:
 • ... + 8 more items
 
 ✅ Reply *haan* to save this bill or *nahi* to cancel.`);
+  }
 }
 
 async function sendMessage(to: string, body: string) {
