@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { PnlEntryData, PendingConfirmationPayload, PnlSummary } from '../app/api/webhook/types';
+import { PnlEntryData, PendingConfirmationPayload, PnlSummary } from '../../app/api/webhook/types';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -13,7 +13,7 @@ const supabase = createClient(
 export const dataService = {
 
   /**
-   * Additive upsert for pnl_entries (core operation)
+   * Additive upsert for pnl_entries
    */
   async upsertPnlEntry(restaurantId: string, date: string, data: PnlEntryData) {
     try {
@@ -68,7 +68,7 @@ export const dataService = {
   },
 
   /**
-   * Store pending confirmation for media uploads
+   * Store pending confirmation
    */
   async createPendingConfirmation(restaurantId: string, payload: PendingConfirmationPayload) {
     try {
@@ -78,7 +78,7 @@ export const dataService = {
           restaurant_id: restaurantId,
           action: 'add_entries',
           payload,
-          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 min TTL
+          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
         });
 
       if (error) {
@@ -94,7 +94,7 @@ export const dataService = {
   },
 
   /**
-   * Delete pending confirmation after confirmation/cancel
+   * Clean up pending confirmation
    */
   async deletePendingConfirmation(restaurantId: string) {
     try {
@@ -117,7 +117,7 @@ export const dataService = {
   },
 
   /**
-   * Soft delete an entry (for future undo/delete feature)
+   * Soft delete an entry
    */
   async softDeleteEntry(restaurantId: string, date: string) {
     try {
