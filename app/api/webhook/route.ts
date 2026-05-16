@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Import all handlers (as per TRD modular structure)
+// Import handlers (as per TRD modular structure)
 import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 import { handleConfirmation } from './handlers/confirmationHandler';
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // 1. Check for confirmation replies first (haan / nahi / yes / no)
+    // 1. Priority: Check for confirmation replies (haan / nahi)
     const confirmationHandled = await handleConfirmation(from, restaurant.id, body);
     if (confirmationHandled) {
       console.log(`[Webhook] Confirmation handled in ${Date.now() - startTime}ms`);
