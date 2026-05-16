@@ -52,45 +52,24 @@ export async function POST(req: NextRequest) {
 
 // ====================== MEDIA HANDLING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... This may take 5-10 seconds.");
+  await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
 
   try {
-    // Download media
-    const mediaResponse = await fetch(mediaUrl);
-    const mediaBuffer = await mediaResponse.arrayBuffer();
-    const base64Media = Buffer.from(mediaBuffer).toString('base64');
+    // For now, we use a simple approach - tell user we are improving
+    await sendMessage(from, 
+`✅ Media received!
 
-    const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 700,
-      messages: [{
-        role: "user",
-        content: [
-          { 
-            type: "text", 
-            text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and main items with amounts. Be concise." 
-          },
-          { 
-            type: "image", 
-            source: { 
-              type: "base64", 
-              media_type: "image/jpeg", 
-              data: base64Media 
-            }
-          }
-        ]
-      }]
-    });
+I am still improving bill parsing.
 
-    const extracted = aiResponse.content?.[0]?.type === 'text' 
-      ? aiResponse.content[0].text 
-      : "Could not read the bill.";
+For faster processing, please type the main total like:
+• hyperpure 2845
+• bigbasket 1650
 
-    await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${extracted}\n\nReply *haan* to save, or *nahi* to cancel.`);
+Or reply *haan* if you want me to try again.`);
 
-  } catch (error: any) {
-    console.error("Media Parse Error:", error.message);
-    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
+  } catch (error) {
+    console.error("Media handling error:", error);
+    await sendMessage(from, "Sorry, I couldn't process this file right now.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
   }
 }
 
