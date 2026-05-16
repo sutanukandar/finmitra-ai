@@ -1,4 +1,5 @@
 import { dataService } from '../services/dataService';
+import { PendingConfirmationPayload } from '../types';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
   const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(body);
@@ -10,13 +11,13 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
   try {
     if (isConfirm) {
-      // TODO: In future we will move data from pending_confirmations to pnl_entries here
+      // TODO: Move data from pending_confirmations to pnl_entries here (future)
       await sendMessage(from, "✅ Bill saved successfully!\nHyperpure ₹2,845 added for today.");
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up pending confirmation using centralized dataService (as per TRD)
+    // Clean up pending confirmation using dataService
     await dataService.deletePendingConfirmation(restaurantId);
 
     console.log(`[ConfirmationHandler] Confirmation processed for ${restaurantId}`);
