@@ -35,14 +35,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // === MEDIA UPLOAD ===
     if (mediaUrl) {
       await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
-    // Text message (keep simple for now)
-    await sendMessage(from, "✅ Text received! Full features coming soon.");
+    await sendMessage(from, "✅ Text received!");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -52,14 +50,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== REAL MEDIA PARSING + CONFIRMATION ======================
+// ====================== REAL MEDIA PARSING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
   await sendMessage(from, "📸 Processing your bill... This may take a few seconds.");
 
   try {
-    // Download media and send to Claude (simplified for now)
+    // Download the media
     const mediaResponse = await fetch(mediaUrl);
     const mediaBuffer = await mediaResponse.arrayBuffer();
+    const base64Media = Buffer.from(mediaBuffer).toString('base64');
 
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
@@ -67,17 +66,25 @@ async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: s
       messages: [{
         role: "user",
         content: [
-          { type: "text", text: "Extract all financial data from this invoice. Return structured summary with total and key items." },
-          { type: "image", source: { type: "base64", media_type: mediaType || "application/pdf", data: Buffer.from(mediaBuffer).toString('base64') }}
+          { type: "text", text: "This is a bill from a restaurant supplier in India. Extract the date, vendor, total amount, and list all key items with their amounts." },
+          { 
+            type: "image", 
+            source: { 
+              type: "base64", 
+              media_type: mediaType?.includes('pdf') ? "application/pdf" : "image/jpeg", 
+              data: base64Media 
+            }
+          }
         ]
       }]
     });
 
-    const extractedText = aiResponse.content[0].type === 'text' ? aiResponse.content[0].text : "Could not extract data.";
+    const extracted = aiResponse.content[0].type === 'text' ? aiResponse.content[0].text : "Could not extract data.";
 
-    await sendMessage(from, `✅ Bill Parsed!\n\n${extractedText}\n\nReply *haan* to save, or *nahi* to cancel.`);
+    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save this bill, or *nahi* to cancel.`);
 
   } catch (error) {
+    console.error("Media parsing error:", error);
     await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually.\nExample: `hyperpure 2845`");
   }
 }
