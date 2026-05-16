@@ -14,8 +14,8 @@ export async function handleMediaUpload(
     // Use centralized parser
     const parseResult = await parser.parseMedia(mediaUrl, null);
 
-    if (parseResult.success && parseResult.extracted) {
-      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
+    if (parseResult.success) {
+      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.message}\n\nReply *haan* to save or *nahi* to cancel.`);
     } else {
       // Fallback preview (stable UX)
       await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
