@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
+    const mediaType = formData.get('MediaContentType0') as string | null;
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -34,24 +35,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // === Confirmation Handling ===
-    if (['haan', 'yes', 'confirm', 'okay'].includes(body)) {
-      await sendMessage(from, "✅ Bill saved successfully!\nHyperpure ₹2,845 added for today.");
-      return NextResponse.json({ success: true });
-    }
-
-    if (['nahi', 'no', 'cancel'].includes(body)) {
-      await sendMessage(from, "❌ Cancelled. No data was saved.");
-      return NextResponse.json({ success: true });
-    }
-
-    // === Media Upload ===
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl);
+      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
-    await sendMessage(from, "✅ Got it! Try uploading a bill or type like `swiggy 4500 aaj`");
+    await sendMessage(from, "✅ Got it!");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -61,27 +50,58 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== STABLE MEDIA CONFIRMATION FLOW ======================
-async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string) {
-  await sendMessage(from, "📸 Processing your bill... This may take 5-10 seconds.");
+// ====================== REAL PARSING (P0) ======================
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
+  await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-  // Reliable Fallback Preview (Good UX)
-  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
+  try {
+    // 1. Download from Twilio
+    const response = await fetch(mediaUrl);
+    const buffer = await response.arrayBuffer();
+    const fileExt = mediaType?.includes('pdf') ? 'pdf' : 'jpg';
+    const fileName = `${restaurantId}/${Date.now()}.${fileExt}`;
 
-📅 Date: 16-May-2026
-🏪 Vendor: Hyperpure
-💰 Total Amount: ₹2,845
+    // 2. Upload to Supabase Storage
+    await supabase.storage.from('bills').upload(fileName, buffer, {
+      contentType: mediaType || 'image/jpeg',
+      upsert: true
+    });
 
-Key Items:
-• Toned Milk 5L × 12 = ₹696
-• Paneer 500g × 8 = ₹1,680
-• Butter 100g × 5 = ₹280
-• Fresh Cream 1L × 3 = ₹189
-• ... + 8 more items
+    const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(fileName);
 
-Total Items: 12
+    // 3. Try Claude with proper content type
+    const content: any[] = [
+      { type: "text", text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and list main items with amounts. Be detailed." }
+    ];
 
-✅ Reply *haan* to save this bill or *nahi* to cancel.`);
+    if (mediaType?.includes('pdf')) {
+      content.push({
+        type: "document",
+        source: { type: "url", url: publicUrl, media_type: "application/pdf" }
+      });
+    } else {
+      content.push({
+        type: "image",
+        source: { type: "url", url: publicUrl }
+      });
+    }
+
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 800,
+      messages: [{ role: "user", content }]
+    });
+
+    const extracted = aiResponse.content?.[0]?.type === 'text' 
+      ? aiResponse.content[0].text 
+      : "Could not extract data.";
+
+    await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+
+  } catch (error: any) {
+    console.error("Real Parsing Failed:", error.message);
+    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually for now.\nExample: `hyperpure 2845`");
+  }
 }
 
 async function sendMessage(to: string, body: string) {
