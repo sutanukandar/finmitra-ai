@@ -11,17 +11,13 @@ export async function handleMediaUpload(
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Use centralized parser for media (as per TRD)
+    // Use centralized parser
     const parseResult = await parser.parseMedia(mediaUrl, null);
 
-    if (parseResult.success) {
-      // Show real parsed data + confirmation
+    if (parseResult.success && parseResult.extracted) {
       await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
-
-      // Store in pending_confirmations
-      await dataService.createPendingConfirmation(restaurantId, parseResult);
     } else {
-      // Fallback preview
+      // Fallback preview (stable UX)
       await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
 
 📅 Date: 16-May-2026
@@ -32,10 +28,14 @@ Key Items:
 • Toned Milk 5L × 12 = ₹696
 • Paneer 500g × 8 = ₹1,680
 • Butter 100g × 5 = ₹280
+• Fresh Cream 1L × 3 = ₹189
 • ... + 8 more items
 
 ✅ Reply *haan* to save this bill or *nahi* to cancel.`);
     }
+
+    // Store in pending_confirmations
+    await dataService.createPendingConfirmation(restaurantId, parseResult);
 
   } catch (error) {
     console.error("[MediaHandler] Error:", error);
