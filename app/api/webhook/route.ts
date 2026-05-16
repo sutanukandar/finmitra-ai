@@ -22,6 +22,8 @@ export async function POST(req: NextRequest) {
     const mediaUrl = formData.get('MediaUrl0') as string | null;
     const mediaType = formData.get('MediaContentType0') as string | null;
 
+    console.log(`[Webhook] 📥 From: ${from} | Media: ${mediaType} | URL: ${mediaUrl ? 'Yes' : 'No'}`);
+
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
     const { data: restaurant } = await supabase
@@ -50,56 +52,60 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== REAL PARSING (P0) ======================
+// ====================== REAL PARSING WITH DETAILED LOGGING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
+  console.log(`[Media] Starting processing for ${restaurantId}. Type: ${mediaType}`);
+
   await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
   try {
-    // 1. Download from Twilio
+    // Download from Twilio
+    console.log(`[Media] Downloading from Twilio: ${mediaUrl}`);
     const response = await fetch(mediaUrl);
     const buffer = await response.arrayBuffer();
-    const fileExt = mediaType?.includes('pdf') ? 'pdf' : 'jpg';
-    const fileName = `${restaurantId}/${Date.now()}.${fileExt}`;
+    console.log(`[Media] Downloaded size: ${buffer.byteLength} bytes`);
 
-    // 2. Upload to Supabase Storage
+    // Upload to Supabase Storage
+    const fileName = `${restaurantId}/${Date.now()}.jpg`;
+    console.log(`[Media] Uploading to Supabase as: ${fileName}`);
+
     await supabase.storage.from('bills').upload(fileName, buffer, {
-      contentType: mediaType || 'image/jpeg',
+      contentType: 'image/jpeg',
       upsert: true
     });
 
     const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(fileName);
+    console.log(`[Media] Public URL: ${publicUrl}`);
 
-    // 3. Try Claude with proper content type
-    const content: any[] = [
-      { type: "text", text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and list main items with amounts. Be detailed." }
-    ];
-
-    if (mediaType?.includes('pdf')) {
-      content.push({
-        type: "document",
-        source: { type: "url", url: publicUrl, media_type: "application/pdf" }
-      });
-    } else {
-      content.push({
-        type: "image",
-        source: { type: "url", url: publicUrl }
-      });
-    }
-
+    // Send to Claude
+    console.log(`[Media] Sending to Claude...`);
     const aiResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 800,
-      messages: [{ role: "user", content }]
+      max_tokens: 700,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "This is a supplier bill. Extract: Vendor name, Date, Total Amount, and main items." },
+          { type: "image", source: { type: "url", url: publicUrl } }
+        ]
+      }]
     });
+
+    console.log(`[Media] Claude response received successfully`);
 
     const extracted = aiResponse.content?.[0]?.type === 'text' 
       ? aiResponse.content[0].text 
       : "Could not extract data.";
 
-    await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save or *nahi* to cancel.`);
 
   } catch (error: any) {
-    console.error("Real Parsing Failed:", error.message);
+    console.error("[Media] Parsing Failed:", {
+      message: error.message,
+      status: error.status,
+      requestId: error.requestId || 'N/A'
+    });
+
     await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually for now.\nExample: `hyperpure 2845`");
   }
 }
