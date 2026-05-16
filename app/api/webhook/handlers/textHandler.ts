@@ -1,4 +1,5 @@
 import { handlePnlQuery } from './queryHandler';
+import { dataService } from '../services/dataService';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   try {
@@ -18,7 +19,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       return;
     }
 
-    // Default response for other text messages
+    // Default response
     await sendMessage(from, "✅ Got it!\nTry:\n• `aaj ka P&L`\n• `this month`\n• `swiggy 4500 aaj`");
 
   } catch (error) {
