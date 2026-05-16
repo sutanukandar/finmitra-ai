@@ -35,9 +35,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Handle confirmation replies
+    // Handle confirmation
     if (['haan', 'yes', 'confirm', 'okay'].includes(body)) {
-      await sendMessage(from, "✅ Data saved successfully!\n\nHyperpure ₹2,845 added for today.");
+      await sendMessage(from, "✅ Bill saved successfully!\n\nData has been added to your P&L.");
       return NextResponse.json({ success: true });
     }
 
@@ -52,7 +52,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Normal text
     await sendMessage(from, "✅ Got it!");
     return NextResponse.json({ success: true });
 
@@ -63,27 +62,47 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== MEDIA UPLOAD + PREVIEW ======================
+// ====================== REAL MEDIA PARSING ======================
 async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
-  await sendMessage(from, "📸 Processing your bill... Please wait.");
+  await sendMessage(from, "📸 Processing your bill... This may take 8-12 seconds.");
 
-  // Simulated realistic extraction (we will replace with real Claude later)
-  const preview = `✅ Hyperpure Bill Parsed Successfully!
+  try {
+    const mediaResponse = await fetch(mediaUrl);
+    const mediaBuffer = await mediaResponse.arrayBuffer();
+    const base64Media = Buffer.from(mediaBuffer).toString('base64');
 
-📅 Date: 16-May-2026
-🏪 Vendor: Hyperpure
-💰 Total Amount: ₹2,845
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 700,
+      messages: [{
+        role: "user",
+        content: [
+          { 
+            type: "text", 
+            text: "Extract key information from this supplier bill. Return in this format:\nVendor:\nDate:\nTotal Amount:\nKey Items (list 4-5 main items)" 
+          },
+          { 
+            type: "image", 
+            source: { 
+              type: "base64", 
+              media_type: "image/jpeg", 
+              data: base64Media 
+            }
+          }
+        ]
+      }]
+    });
 
-Key Items:
-• Toned Milk 5L × 12 = ₹696
-• Paneer 500g × 8 = ₹1,680
-• Butter 100g × 5 = ₹280
-• Fresh Cream 1L × 3 = ₹189
-• ... + 8 more items
+    const extracted = aiResponse.content?.[0]?.type === 'text' 
+      ? aiResponse.content[0].text 
+      : "Could not read the bill clearly.";
 
-Total Items: 12`;
+    await sendMessage(from, `✅ Bill Parsed!\n\n${extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
 
-  await sendMessage(from, `${preview}\n\n✅ Do you want to save this bill?\n\nReply *haan* to save or *nahi* to cancel.`);
+  } catch (error: any) {
+    console.error("Parsing Error:", error.message);
+    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type manually like:\n`hyperpure 2845`");
+  }
 }
 
 async function sendMessage(to: string, body: string) {
