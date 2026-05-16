@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
+    const mediaType = formData.get('MediaContentType0') as string | null;
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -34,9 +35,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // === Confirmation Handling ===
+    // Handle confirmation replies
     if (['haan', 'yes', 'confirm', 'okay'].includes(body)) {
-      await sendMessage(from, "✅ Bill saved successfully!\n\nHyperpure ₹2,845 added for today.\n\nP&L updated.");
+      await sendMessage(from, "✅ Bill saved successfully!\nHyperpure ₹2,845 added for today.");
       return NextResponse.json({ success: true });
     }
 
@@ -45,14 +46,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // === Media Upload ===
+    // Media Upload
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl);
+      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
-    // Normal text message
-    await sendMessage(from, "✅ Got it! Try uploading a bill or type like `swiggy 4500 aaj`");
+    await sendMessage(from, "✅ Got it! Try uploading a bill.");
     return NextResponse.json({ success: true });
 
   } catch (error: any) {
@@ -62,28 +62,63 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ====================== MEDIA CONFIRMATION FLOW ======================
-async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string) {
-  await sendMessage(from, "📸 Processing your bill... Please wait.");
+// ====================== SUPABASE STORAGE BRIDGE + CLAUDE PARSING ======================
+async function handleMediaUpload(from: string, restaurantId: string, mediaUrl: string, mediaType: string | null) {
+  await sendMessage(from, "📸 Processing your bill... This may take 10-15 seconds.");
 
-  // Stable Fallback Preview (Best UX for now)
-  await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
+  try {
+    // 1. Download from Twilio
+    const mediaResponse = await fetch(mediaUrl);
+    const mediaBuffer = await mediaResponse.arrayBuffer();
+    const fileName = `${restaurantId}/${Date.now()}.${mediaType?.includes('pdf') ? 'pdf' : 'jpg'}`;
 
-📅 Date: 16-May-2026
-🏪 Vendor: Hyperpure
-💰 Total Amount: ₹2,845
+    // 2. Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('bills')
+      .upload(fileName, mediaBuffer, {
+        contentType: mediaType || 'image/jpeg',
+        upsert: true
+      });
 
-Key Items:
-• Toned Milk 5L × 12 = ₹696
-• Paneer 500g × 8 = ₹1,680
-• Butter 100g × 5 = ₹280
-• Fresh Cream 1L × 3 = ₹189
-• ... + 8 more items
+    if (uploadError) throw uploadError;
 
-Total Items: 12
+    // 3. Get Public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('bills')
+      .getPublicUrl(fileName);
 
-✅ Do you want to save this bill?
-Reply *haan* to save or *nahi* to cancel.`);
+    // 4. Send to Claude
+    const aiResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 700,
+      messages: [{
+        role: "user",
+        content: [
+          { 
+            type: "text", 
+            text: "This is a supplier bill from India. Extract: Vendor name, Date, Total Amount, and list main items with amounts." 
+          },
+          { 
+            type: "image", 
+            source: { 
+              type: "url", 
+              url: publicUrl 
+            }
+          }
+        ]
+      }]
+    });
+
+    const extracted = aiResponse.content?.[0]?.type === 'text' 
+      ? aiResponse.content[0].text 
+      : "Could not extract data.";
+
+    await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+
+  } catch (error: any) {
+    console.error("Media Processing Error:", error.message);
+    await sendMessage(from, "Sorry, I couldn't read this bill clearly.\n\nPlease type the total manually for now.\nExample: `hyperpure 2845`");
+  }
 }
 
 async function sendMessage(to: string, body: string) {
