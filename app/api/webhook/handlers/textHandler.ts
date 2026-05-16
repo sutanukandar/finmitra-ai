@@ -27,7 +27,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
         const field = fieldMap[entry.category] || 'fixed';
 
-        // Use centralized dataService
         await dataService.upsertPnlEntry(restaurantId, todayDate, {
           [field]: entry.amount || 0
         });
