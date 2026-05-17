@@ -32,7 +32,7 @@ Example output:
         : '{}';
 
       // Clean markdown code blocks if Claude adds them
-      text = text.replace(/```json
+      text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const parsed = JSON.parse(text) as ParsedIntent;
       return parsed;
@@ -44,7 +44,7 @@ Example output:
   },
 
   /**
-   * Parse media (photo or PDF)
+   * Parse media (photo or PDF) using Claude Vision
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     console.log(`[Parser] Media parsing requested for ${mediaType || 'unknown'}`);
