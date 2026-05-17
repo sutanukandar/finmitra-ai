@@ -5,18 +5,17 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
   const isCancel = ['nahi', 'no', 'cancel'].includes(body);
 
   if (!isConfirm && !isCancel) {
-    return false; // Not a confirmation message
+    return false;
   }
 
   try {
     if (isConfirm) {
-      // TODO: In future we will move data from pending_confirmations to pnl_entries here
-      await sendMessage(from, "✅ Bill saved successfully!\nHyperpure ₹2,845 added for today.");
+      await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up pending confirmation using centralized dataService
+    // Clean up pending confirmation
     await dataService.deletePendingConfirmation(restaurantId);
 
     console.log(`[ConfirmationHandler] Confirmation processed for ${restaurantId}`);
@@ -41,4 +40,3 @@ async function sendMessage(to: string, body: string) {
     to: `whatsapp:${to}`,
     body: body,
   });
-}
