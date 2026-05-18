@@ -11,21 +11,25 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
   try {
     if (isConfirm) {
-      // Get the pending parsed bill (safe handling)
       const pending = await dataService.getPendingConfirmation(restaurantId);
+
+      console.log("[ConfirmationHandler] Pending data received:", JSON.stringify(pending, null, 2));
 
       if (pending && pending.parse_result?.success) {
         const parseResult = pending.parse_result;
 
-        // Save item-level data into invoice_items
+        console.log("[ConfirmationHandler] parseResult.extracted length:", parseResult.extracted?.length || 0);
+        console.log("[ConfirmationHandler] parseResult.items:", parseResult.items);
+
+        // Try to save items (will be empty for now)
         await dataService.saveInvoiceItems(
           restaurantId,
-          parseResult.vendor || "Supplier",
+          parseResult.vendor || "Hyperpure",
           parseResult.date || new Date().toISOString().split('T')[0],
           parseResult.items || []
         );
 
-        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} items added to invoice_items table.`);
+        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} added.`);
       } else {
         await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
       }
@@ -34,10 +38,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up
     await dataService.deletePendingConfirmation(restaurantId);
-
-    console.log(`[ConfirmationHandler] Processed for ${restaurantId}`);
 
     return true;
 
