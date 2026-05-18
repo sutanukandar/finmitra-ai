@@ -12,8 +12,10 @@ export const dataService = {
     let entry: PnlEntryData;
 
     if (arg3 !== undefined) {
+      // backfill style: upsertPnlEntry(restaurantId, date, totals)
       entry = { date: arg2, ...arg3 };
     } else {
+      // webhook style: upsertPnlEntry(restaurantId, entry)
       entry = arg2;
     }
 
@@ -28,12 +30,23 @@ export const dataService = {
     return { success: true };
   },
 
-  async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth' | string) {
-    const { data, error } = await supabase
+  async getPnlData(restaurantId: string, arg2: any, arg3?: any) {
+    let query = supabase
       .from('pnl_entries')
       .select('*')
       .eq('restaurant_id', restaurantId)
       .order('date', { ascending: false });
+
+    // Support both old style (period) and new style (startDate, endDate)
+    if (typeof arg2 === 'string' && arg3) {
+      // date range: getPnlData(restaurantId, startDate, endDate)
+      query = query.gte('date', arg2).lte('date', arg3);
+    } else if (['today', 'mtd', 'lastmonth'].includes(arg2)) {
+      // period style (kept for compatibility)
+      // For now we return all data - you can enhance filtering later
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("[dataService] getPnlData failed:", error);
