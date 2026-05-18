@@ -11,23 +11,39 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
   try {
     if (isConfirm) {
-      await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
+      // Fetch the pending parsed bill
+      const { data: pending } = await dataService.getPendingConfirmation(restaurantId);
 
-      // TODO: In next iteration we will parse the full Claude response and save items
-      console.log(`[ConfirmationHandler] Bill confirmed and saved for restaurant ${restaurantId}`);
+      if (pending && pending.parse_result?.success) {
+        const parseResult = pending.parse_result;
+
+        // Save item-level data into invoice_items table
+        await dataService.saveInvoiceItems(
+          restaurantId,
+          parseResult.vendor || "Hyperpure",
+          parseResult.date || new Date().toISOString().split('T')[0],
+          parseResult.items || []   // We will improve item extraction in next step
+        );
+
+        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Supplier'} items added to invoice_items table.`);
+      } else {
+        await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
+      }
 
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up
+    // Clean up pending confirmation
     await dataService.deletePendingConfirmation(restaurantId);
+
+    console.log(`[ConfirmationHandler] Processed for ${restaurantId}`);
 
     return true;
 
   } catch (error) {
     console.error("[ConfirmationHandler] Error:", error);
-    await sendMessage(from, "Sorry, something went wrong while processing confirmation.");
+    await sendMessage(from, "Sorry, something went wrong while saving the bill.");
     return true;
   }
 }
