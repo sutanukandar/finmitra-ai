@@ -13,12 +13,14 @@ export const dataService = {
       .from('pnl_entries')
       .upsert({ ...entry, restaurant_id: restaurantId }, { onConflict: 'restaurant_id,date' });
 
-    if (error) throw error;
-    return true;
+    if (error) {
+      console.error("[dataService] upsertPnlEntry failed:", error);
+      return { success: false };
+    }
+    return { success: true };
   },
 
   async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth') {
-    // Your existing P&L logic stays here
     const { data, error } = await supabase
       .from('pnl_entries')
       .select('*')
@@ -33,7 +35,6 @@ export const dataService = {
     const { error } = await supabase
       .from('pending_confirmations')
       .insert({ restaurant_id: restaurantId, parse_result: parseResult });
-
     if (error) throw error;
   },
 
@@ -42,12 +43,11 @@ export const dataService = {
       .from('pending_confirmations')
       .delete()
       .eq('restaurant_id', restaurantId);
-
     if (error) console.error(error);
   },
 
   /**
-   * NEW: Save detailed item-level data from bill
+   * Save detailed item-level data from bill into invoice_items table
    */
   async saveInvoiceItems(
     restaurantId: string,
@@ -78,6 +78,6 @@ export const dataService = {
     }
 
     console.log(`[dataService] Saved ${insertData.length} item-level rows for ${vendor}`);
-    return true;
+    return { success: true };
   }
 };
