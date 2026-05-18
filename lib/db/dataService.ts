@@ -39,7 +39,6 @@ export const dataService = {
     }
 
     const { data, error } = await query;
-
     if (error) {
       console.error("[dataService] getPnlData failed:", error);
       return { data: [], error };
@@ -47,14 +46,28 @@ export const dataService = {
     return { data: data || [], error: null };
   },
 
+  /** FIXED: Properly creates pending confirmation with all required columns */
   async createPendingConfirmation(restaurantId: string, parseResult: any) {
+    const payload = {
+      action: 'media_upload',
+      payload: parseResult,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days TTL
+    };
+
     const { error } = await supabase
       .from('pending_confirmations')
-      .insert({ restaurant_id: restaurantId, parse_result: parseResult });
-    if (error) throw error;
+      .insert({
+        restaurant_id: restaurantId,
+        ...payload
+      });
+
+    if (error) {
+      console.error("[dataService] createPendingConfirmation failed:", error);
+      throw error;
+    }
+    console.log(`[dataService] Pending confirmation created for ${restaurantId}`);
   },
 
-  /** Fixed: Safe get pending confirmation */
   async getPendingConfirmation(restaurantId: string) {
     const { data, error } = await supabase
       .from('pending_confirmations')
@@ -62,7 +75,7 @@ export const dataService = {
       .eq('restaurant_id', restaurantId)
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle();   // ← Changed to maybeSingle (safe)
+      .maybeSingle();
 
     if (error || !data) {
       console.error("[dataService] getPendingConfirmation failed or no record:", error);
