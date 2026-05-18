@@ -1,6 +1,5 @@
 import { parser } from '../parser';
 import { dataService } from '../../../../lib/db/dataService';
-import { MediaParseResult } from '../types';
 
 export async function handleMediaUpload(
   from: string, 
@@ -8,41 +7,33 @@ export async function handleMediaUpload(
   mediaUrl: string,
   mediaType: string | null = null
 ) {
-  console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType}`);
+  console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType || 'unknown'}`);
 
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Use centralized AI Parser (as per TRD)
-    const parseResult: MediaParseResult = await parser.parseMedia(mediaUrl, mediaType);
+    // Real parsing
+    const parseResult = await parser.parseMedia(mediaUrl, mediaType);
 
     if (parseResult.success && parseResult.extracted) {
-      // Show real parsed data + confirmation
       await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+
+      // Make this non-blocking so preview always shows
+      try {
+        await dataService.createPendingConfirmation(restaurantId, parseResult);
+        console.log(`[MediaHandler] Pending confirmation saved successfully`);
+      } catch (pendingError) {
+        console.error("[MediaHandler] Could not save pending confirmation (non-blocking):", pendingError);
+        // Do not break the flow
+      }
+
     } else {
-      // Fallback preview (stable UX)
-      await sendMessage(from, `✅ Hyperpure Bill Parsed Successfully!
-
-📅 Date: 16-May-2026
-🏪 Vendor: Hyperpure
-💰 Total Amount: ₹2,845
-
-Key Items:
-• Toned Milk 5L × 12 = ₹696
-• Paneer 500g × 8 = ₹1,680
-• Butter 100g × 5 = ₹280
-• Fresh Cream 1L × 3 = ₹189
-• ... + 8 more items
-
-✅ Reply *haan* to save this bill or *nahi* to cancel.`);
+      await sendMessage(from, "Sorry, I couldn't read this bill clearly.\nPlease type manually like: `hyperpure 2845`");
     }
 
-    // Store in pending_confirmations using centralized dataService
-    await dataService.createPendingConfirmation(restaurantId, parseResult);
-
   } catch (error) {
-    console.error("[MediaHandler] Error:", error);
-    await sendMessage(from, "Sorry, I couldn't process this file right now.\nPlease type the total manually.\nExample: `hyperpure 2845`");
+    console.error("[MediaHandler] Critical error:", error);
+    await sendMessage(from, "Sorry, something went wrong while processing the bill.");
   }
 }
 
