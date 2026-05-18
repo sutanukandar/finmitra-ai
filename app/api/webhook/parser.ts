@@ -1,76 +1,40 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { ParsedIntent, MediaParseResult } from './types';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
-
-export const parser = {
-
-  async parseTextMessage(message: string, todayDate: string): Promise<ParsedIntent> {
-    const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
-Parse the user message and return ONLY valid JSON (no markdown, no code blocks).
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, help, unknown.
-Categories: swiggy, phonepe, hyperpure, bigbasket, milk, bread, rent, electricity, gas, salary, fixed.
-
-Example output:
-{"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 4500, "date_offset": 0}]}`;
-
-    try {
-      const aiResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [{ role: "user", content: message }]
-      });
-
-      let text = aiResponse.content?.[0]?.type === 'text' 
-        ? aiResponse.content[0].text.trim() 
-        : '{}';
-
-      text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      return JSON.parse(text) as ParsedIntent;
-    } catch (error) {
-      console.error("[Parser] parseTextMessage failed:", error);
-      return { intent: "unknown" };
-    }
-  },
-
   /**
-   * Improved Media Parsing with Twilio Authentication
+   * Improved Media Parsing - Returns structured data + items array
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     console.log(`[Parser] Starting media parsing. Type: ${mediaType || 'unknown'}`);
 
     try {
-      // Add Twilio Basic Auth when downloading media
       const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
 
       const response = await fetch(mediaUrl, {
-        headers: {
-          'Authorization': `Basic ${auth}`
-        }
+        headers: { 'Authorization': `Basic ${auth}` }
       });
 
-      if (!response.ok) {
-        throw new Error(`Twilio media download failed: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
 
       const buffer = await response.arrayBuffer();
-      console.log(`[Parser] Downloaded size: ${(buffer.byteLength / 1024).toFixed(1)} KB`);
-
       const base64Data = Buffer.from(buffer).toString('base64');
 
       const aiResponse = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: 800,
+        max_tokens: 1200,
         messages: [{
           role: "user",
           content: [
             { 
               type: "text", 
-              text: "This is a supplier bill from India. Extract: Vendor name, Date, Total Amount, and list main items with amounts." 
+              text: `Extract this Indian supplier bill as structured JSON.
+Return ONLY valid JSON with this exact structure:
+{
+  "success": true,
+  "vendor": "Hyperpure",
+  "date": "2026-05-18",
+  "total": 4165.56,
+  "items": [
+    {"item_name": "VIVI - Honey, 1 Kg", "quantity": 2, "unit": "Kg", "amount": 420}
+  ]
+}`
             },
             { 
               type: "image", 
@@ -84,15 +48,21 @@ Example output:
         }]
       });
 
-      const extracted = aiResponse.content?.[0]?.type === 'text' 
-        ? aiResponse.content[0].text 
-        : "Could not extract data.";
+      let text = aiResponse.content?.[0]?.type === 'text' 
+        ? aiResponse.content[0].text.trim() 
+        : '{}';
 
-      console.log(`[Parser] Claude parsing successful`);
+      text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+      const parsed = JSON.parse(text);
 
       return {
         success: true,
-        extracted: extracted
+        extracted: parsed.extracted || text,   // keep nice text for user
+        vendor: parsed.vendor,
+        date: parsed.date,
+        total: parsed.total,
+        items: parsed.items || []
       };
 
     } catch (error: any) {
@@ -103,4 +73,3 @@ Example output:
       };
     }
   }
-};
