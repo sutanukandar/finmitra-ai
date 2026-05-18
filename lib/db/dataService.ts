@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { PnlEntryData, PendingConfirmationPayload, MediaParseResult } from '../../app/api/webhook/types';
+import { PnlEntryData } from '../../app/api/webhook/types';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -8,7 +8,20 @@ const supabase = createClient(
 
 export const dataService = {
 
-  async upsertPnlEntry(restaurantId: string, entry: PnlEntryData) {
+  /**
+   * Supports both old backfill call (3 args) and new webhook call (2 args)
+   */
+  async upsertPnlEntry(restaurantId: string, arg2: any, arg3?: any) {
+    let entry: PnlEntryData;
+
+    if (arg3 !== undefined) {
+      // Old backfill style: upsertPnlEntry(restaurant_id, date, totals)
+      entry = { date: arg2, ...arg3 };
+    } else {
+      // New webhook style: upsertPnlEntry(restaurantId, entry)
+      entry = arg2;
+    }
+
     const { error } = await supabase
       .from('pnl_entries')
       .upsert({ ...entry, restaurant_id: restaurantId }, { onConflict: 'restaurant_id,date' });
