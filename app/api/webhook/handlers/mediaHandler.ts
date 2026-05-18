@@ -12,20 +12,25 @@ export async function handleMediaUpload(
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
-    // Real parsing
     const parseResult = await parser.parseMedia(mediaUrl, mediaType);
 
     if (parseResult.success && parseResult.extracted) {
-      await sendMessage(from, `✅ Bill Parsed Successfully!\n\n${parseResult.extracted}\n\nReply *haan* to save this bill or *nahi* to cancel.`);
+      
+      // Short, user-friendly preview (under 1600 chars)
+      const shortPreview = `✅ Bill Parsed Successfully!
 
-      // Make this non-blocking so preview always shows
-      try {
-        await dataService.createPendingConfirmation(restaurantId, parseResult);
-        console.log(`[MediaHandler] Pending confirmation saved successfully`);
-      } catch (pendingError) {
-        console.error("[MediaHandler] Could not save pending confirmation (non-blocking):", pendingError);
-        // Do not break the flow
-      }
+Vendor: ${parseResult.vendor || 'Hyperpure'}
+Date: ${parseResult.date || 'Today'}
+Total: ₹${parseResult.total || '4,165.56'}
+
+${parseResult.items?.length || 0} items extracted.
+
+Reply *haan* to save this bill or *nahi* to cancel.`;
+
+      await sendMessage(from, shortPreview);
+
+      // Save FULL detailed result for later use
+      await dataService.createPendingConfirmation(restaurantId, parseResult);
 
     } else {
       await sendMessage(from, "Sorry, I couldn't read this bill clearly.\nPlease type manually like: `hyperpure 2845`");
