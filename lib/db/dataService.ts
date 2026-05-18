@@ -54,7 +54,7 @@ export const dataService = {
     if (error) throw error;
   },
 
-  /** NEW: Get pending confirmation for haan reply */
+  /** Fixed: Safe get pending confirmation */
   async getPendingConfirmation(restaurantId: string) {
     const { data, error } = await supabase
       .from('pending_confirmations')
@@ -62,10 +62,10 @@ export const dataService = {
       .eq('restaurant_id', restaurantId)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();   // ← Changed to maybeSingle (safe)
 
-    if (error) {
-      console.error("[dataService] getPendingConfirmation failed:", error);
+    if (error || !data) {
+      console.error("[dataService] getPendingConfirmation failed or no record:", error);
       return null;
     }
     return data;
