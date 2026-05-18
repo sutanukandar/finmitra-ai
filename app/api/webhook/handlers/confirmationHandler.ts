@@ -12,14 +12,15 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
   try {
     if (isConfirm) {
       await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
-      
-      // TODO: In next step we will extract real items and call saveInvoiceItems
+
+      // TODO: In next iteration we will parse the full Claude response and save items
       console.log(`[ConfirmationHandler] Bill confirmed and saved for restaurant ${restaurantId}`);
+
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up pending confirmation
+    // Clean up
     await dataService.deletePendingConfirmation(restaurantId);
 
     return true;
