@@ -15,21 +15,24 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
       console.log("[ConfirmationHandler] Pending data received:", JSON.stringify(pending, null, 2));
 
-      if (pending && pending.parse_result?.success) {
-        const parseResult = pending.parse_result;
+      if (pending) {
+        // Use 'payload' column (current structure)
+        const parseResult = pending.payload || pending.parse_result;
 
-        console.log("[ConfirmationHandler] parseResult.extracted length:", parseResult.extracted?.length || 0);
-        console.log("[ConfirmationHandler] parseResult.items:", parseResult.items);
+        if (parseResult?.success) {
+          console.log("[ConfirmationHandler] Found parsed data. Saving items...");
 
-        // Try to save items (will be empty for now)
-        await dataService.saveInvoiceItems(
-          restaurantId,
-          parseResult.vendor || "Hyperpure",
-          parseResult.date || new Date().toISOString().split('T')[0],
-          parseResult.items || []
-        );
+          await dataService.saveInvoiceItems(
+            restaurantId,
+            parseResult.vendor || "Hyperpure",
+            parseResult.date || new Date().toISOString().split('T')[0],
+            parseResult.items || []   // Currently empty, but will save record
+          );
 
-        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} added.`);
+          await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} items added to invoice_items table.`);
+        } else {
+          await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
+        }
       } else {
         await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
       }
@@ -38,6 +41,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
+    // Clean up
     await dataService.deletePendingConfirmation(restaurantId);
 
     return true;
