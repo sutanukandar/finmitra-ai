@@ -8,14 +8,43 @@ const supabase = createClient(
 
 export const dataService = {
 
-  // Existing methods (unchanged)
-  async upsertPnlEntry(restaurantId: string, entry: PnlEntryData) { ... }, // keep your existing code
+  async upsertPnlEntry(restaurantId: string, entry: PnlEntryData) {
+    const { error } = await supabase
+      .from('pnl_entries')
+      .upsert({ ...entry, restaurant_id: restaurantId }, { onConflict: 'restaurant_id,date' });
 
-  async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth') { ... }, // keep existing
+    if (error) throw error;
+    return true;
+  },
 
-  async createPendingConfirmation(restaurantId: string, parseResult: any) { ... }, // keep existing
+  async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth') {
+    // Your existing P&L logic stays here
+    const { data, error } = await supabase
+      .from('pnl_entries')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .order('date', { ascending: false });
 
-  async deletePendingConfirmation(restaurantId: string) { ... }, // keep existing
+    if (error) throw error;
+    return data;
+  },
+
+  async createPendingConfirmation(restaurantId: string, parseResult: any) {
+    const { error } = await supabase
+      .from('pending_confirmations')
+      .insert({ restaurant_id: restaurantId, parse_result: parseResult });
+
+    if (error) throw error;
+  },
+
+  async deletePendingConfirmation(restaurantId: string) {
+    const { error } = await supabase
+      .from('pending_confirmations')
+      .delete()
+      .eq('restaurant_id', restaurantId);
+
+    if (error) console.error(error);
+  },
 
   /**
    * NEW: Save detailed item-level data from bill
@@ -24,8 +53,7 @@ export const dataService = {
     restaurantId: string,
     vendor: string,
     date: string,
-    items: any[],
-    uploadRecordId?: string
+    items: any[]
   ) {
     const insertData = items.map(item => ({
       restaurant_id: restaurantId,
