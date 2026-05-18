@@ -8,17 +8,12 @@ const supabase = createClient(
 
 export const dataService = {
 
-  /**
-   * Supports both old backfill call (3 args) and new webhook call (2 args)
-   */
   async upsertPnlEntry(restaurantId: string, arg2: any, arg3?: any) {
     let entry: PnlEntryData;
 
     if (arg3 !== undefined) {
-      // Old backfill style: upsertPnlEntry(restaurant_id, date, totals)
       entry = { date: arg2, ...arg3 };
     } else {
-      // New webhook style: upsertPnlEntry(restaurantId, entry)
       entry = arg2;
     }
 
@@ -33,15 +28,18 @@ export const dataService = {
     return { success: true };
   },
 
-  async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth') {
+  async getPnlData(restaurantId: string, period: 'today' | 'mtd' | 'lastmonth' | string) {
     const { data, error } = await supabase
       .from('pnl_entries')
       .select('*')
       .eq('restaurant_id', restaurantId)
       .order('date', { ascending: false });
 
-    if (error) throw error;
-    return data;
+    if (error) {
+      console.error("[dataService] getPnlData failed:", error);
+      return { data: [], error };
+    }
+    return { data: data || [], error: null };
   },
 
   async createPendingConfirmation(restaurantId: string, parseResult: any) {
@@ -59,9 +57,6 @@ export const dataService = {
     if (error) console.error(error);
   },
 
-  /**
-   * Save detailed item-level data from bill into invoice_items table
-   */
   async saveInvoiceItems(
     restaurantId: string,
     vendor: string,
