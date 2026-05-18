@@ -1,8 +1,9 @@
 import { dataService } from '../../../../lib/db/dataService';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
-  const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(body);
-  const isCancel = ['nahi', 'no', 'cancel'].includes(body);
+  const lowerBody = body.toLowerCase().trim();
+  const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(lowerBody);
+  const isCancel = ['nahi', 'no', 'cancel'].includes(lowerBody);
 
   if (!isConfirm && !isCancel) {
     return false;
@@ -11,14 +12,15 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
   try {
     if (isConfirm) {
       await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
+      
+      // TODO: In next step we will extract real items and call saveInvoiceItems
+      console.log(`[ConfirmationHandler] Bill confirmed and saved for restaurant ${restaurantId}`);
     } else {
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
     // Clean up pending confirmation
     await dataService.deletePendingConfirmation(restaurantId);
-
-    console.log(`[ConfirmationHandler] Confirmation processed for ${restaurantId}`);
 
     return true;
 
@@ -40,3 +42,4 @@ async function sendMessage(to: string, body: string) {
     to: `whatsapp:${to}`,
     body: body,
   });
+}
