@@ -10,12 +10,9 @@ export const dataService = {
 
   async upsertPnlEntry(restaurantId: string, arg2: any, arg3?: any) {
     let entry: PnlEntryData;
-
     if (arg3 !== undefined) {
-      // backfill style: upsertPnlEntry(restaurantId, date, totals)
       entry = { date: arg2, ...arg3 };
     } else {
-      // webhook style: upsertPnlEntry(restaurantId, entry)
       entry = arg2;
     }
 
@@ -37,13 +34,8 @@ export const dataService = {
       .eq('restaurant_id', restaurantId)
       .order('date', { ascending: false });
 
-    // Support both old style (period) and new style (startDate, endDate)
     if (typeof arg2 === 'string' && arg3) {
-      // date range: getPnlData(restaurantId, startDate, endDate)
       query = query.gte('date', arg2).lte('date', arg3);
-    } else if (['today', 'mtd', 'lastmonth'].includes(arg2)) {
-      // period style (kept for compatibility)
-      // For now we return all data - you can enhance filtering later
     }
 
     const { data, error } = await query;
@@ -60,6 +52,23 @@ export const dataService = {
       .from('pending_confirmations')
       .insert({ restaurant_id: restaurantId, parse_result: parseResult });
     if (error) throw error;
+  },
+
+  /** NEW: Get pending confirmation for haan reply */
+  async getPendingConfirmation(restaurantId: string) {
+    const { data, error } = await supabase
+      .from('pending_confirmations')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) {
+      console.error("[dataService] getPendingConfirmation failed:", error);
+      return null;
+    }
+    return data;
   },
 
   async deletePendingConfirmation(restaurantId: string) {
