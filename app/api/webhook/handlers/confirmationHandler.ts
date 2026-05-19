@@ -15,17 +15,27 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
       if (pending && pending.payload?.success) {
         const parseResult = pending.payload;
+        const vendorName = (parseResult.vendor || '').toLowerCase().trim();
 
-        // Dynamic vendor mapping for pnl_entries
-        const vendor = (parseResult.vendor || '').toLowerCase();
+        console.log(`[ConfirmationHandler] Detected vendor: "${parseResult.vendor}"`);
+
+        // Robust Vendor Mapping
         const totals: any = {};
 
-        if (vendor.includes('hyperpure') || vendor.includes('zomato')) {
+        if (vendorName.includes('hyperpure') || vendorName.includes('zomato')) {
           totals.hyperpure = parseResult.total || 0;
-        } else if (vendor.includes('bigbasket') || vendor.includes('big basket')) {
+        } 
+        else if (
+          vendorName.includes('bigbasket') || 
+          vendorName.includes('big basket') || 
+          vendorName.includes('bbnow') || 
+          vendorName.includes('bb now') ||
+          vendorName.includes('innovative retail')
+        ) {
           totals.bigbasket = parseResult.total || 0;
-        } else {
-          totals.fixed = parseResult.total || 0;   // fallback
+        } 
+        else {
+          totals.fixed = parseResult.total || 0;   // safe fallback
         }
 
         // Save item-level data
