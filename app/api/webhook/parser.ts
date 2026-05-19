@@ -38,10 +38,10 @@ Example output:
   },
 
   /**
-   * Supports both Photo (image) and PDF (document) with correct typing
+   * Robust PDF + Image support with header check
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
-    console.log(`[Parser] Starting media parsing. Type: ${mediaType || 'unknown'}`);
+    console.log(`[Parser] Starting media parsing. mediaType: ${mediaType || 'unknown'} | URL: ${mediaUrl}`);
 
     try {
       const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -57,9 +57,18 @@ Example output:
 
       console.log(`[Parser] Downloaded size: ${(buffer.byteLength / 1024).toFixed(1)} KB`);
 
-      const isPdf = (mediaType?.includes('pdf') || mediaUrl.toLowerCase().endsWith('.pdf'));
+      // === STRONG PDF DETECTION ===
+      const urlLower = mediaUrl.toLowerCase();
+      const contentType = response.headers.get('content-type') || '';
+      const isPdf = 
+        mediaType?.includes('pdf') ||
+        urlLower.endsWith('.pdf') ||
+        urlLower.includes('pdf') ||
+        contentType.includes('pdf') ||
+        contentType.includes('application/pdf');
 
-      // Properly typed content blocks for Claude
+      console.log(`[Parser] Detected as PDF: ${isPdf} | Content-Type: ${contentType}`);
+
       const content = [
         { 
           type: "text" as const, 
