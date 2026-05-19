@@ -16,7 +16,19 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       if (pending && pending.payload?.success) {
         const parseResult = pending.payload;
 
-        // 1. Save item-level data
+        // Dynamic vendor mapping for pnl_entries
+        const vendor = (parseResult.vendor || '').toLowerCase();
+        const totals: any = {};
+
+        if (vendor.includes('hyperpure') || vendor.includes('zomato')) {
+          totals.hyperpure = parseResult.total || 0;
+        } else if (vendor.includes('bigbasket') || vendor.includes('big basket')) {
+          totals.bigbasket = parseResult.total || 0;
+        } else {
+          totals.fixed = parseResult.total || 0;   // fallback
+        }
+
+        // Save item-level data
         await dataService.saveInvoiceItems(
           restaurantId,
           parseResult.vendor || "Supplier",
@@ -24,15 +36,13 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           parseResult.items || []
         );
 
-        // 2. Save aggregated total to pnl_entries (complete flow)
-        const totalAmount = parseResult.total || 0;
+        // Save aggregated total with correct column
         await dataService.upsertPnlEntry(restaurantId, {
           date: parseResult.date || new Date().toISOString().split('T')[0],
-          hyperpure: totalAmount,   // or map dynamically later
-          // Add other categories if needed
+          ...totals
         });
 
-        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} (₹${totalAmount}) added to P&L and invoice_items.`);
+        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} (₹${parseResult.total || 0}) added to P&L and invoice_items.`);
       } else {
         await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
       }
@@ -41,7 +51,6 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       await sendMessage(from, "❌ Cancelled. No data was saved.");
     }
 
-    // Clean up
     await dataService.deletePendingConfirmation(restaurantId);
 
     return true;
