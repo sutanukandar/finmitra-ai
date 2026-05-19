@@ -38,7 +38,7 @@ Example output:
   },
 
   /**
-   * Supports both Photo and PDF properly
+   * Supports both Photo (image) and PDF (document) with correct typing
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     console.log(`[Parser] Starting media parsing. Type: ${mediaType || 'unknown'}`);
@@ -57,35 +57,13 @@ Example output:
 
       console.log(`[Parser] Downloaded size: ${(buffer.byteLength / 1024).toFixed(1)} KB`);
 
-      // Decide content block based on file type
-      const isPdf = mediaType?.includes('pdf') || mediaUrl.toLowerCase().endsWith('.pdf');
-      const contentBlock = isPdf 
-        ? {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: base64Data
-            }
-          }
-        : {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: "image/jpeg",
-              data: base64Data
-            }
-          };
+      const isPdf = (mediaType?.includes('pdf') || mediaUrl.toLowerCase().endsWith('.pdf'));
 
-      const aiResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1200,
-        messages: [{
-          role: "user",
-          content: [
-            { 
-              type: "text", 
-              text: `Extract this Indian supplier bill as structured JSON.
+      // Properly typed content blocks for Claude
+      const content = [
+        { 
+          type: "text" as const, 
+          text: `Extract this Indian supplier bill as structured JSON.
 Return ONLY valid JSON with this exact structure:
 {
   "success": true,
@@ -96,10 +74,30 @@ Return ONLY valid JSON with this exact structure:
     {"item_name": "VIVI - Honey, 1 Kg", "quantity": 2, "unit": "Kg", "amount": 420}
   ]
 }`
-            },
-            contentBlock
-          ]
-        }]
+        },
+        isPdf 
+          ? {
+              type: "document" as const,
+              source: {
+                type: "base64" as const,
+                media_type: "application/pdf" as const,
+                data: base64Data
+              }
+            }
+          : {
+              type: "image" as const,
+              source: {
+                type: "base64" as const,
+                media_type: "image/jpeg" as const,
+                data: base64Data
+              }
+            }
+      ];
+
+      const aiResponse = await anthropic.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1200,
+        messages: [{ role: "user", content }]
       });
 
       let text = aiResponse.content?.[0]?.type === 'text' 
