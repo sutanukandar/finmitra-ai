@@ -35,13 +35,14 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           totals.bigbasket = parseResult.total || 0;
         } 
         else {
-          totals.fixed = parseResult.total || 0;   // safe fallback
+          // ALL unknown vendors go to the new 'other' column
+          totals.other = parseResult.total || 0;
         }
 
-        // Save item-level data
+        // Save item-level data (always)
         await dataService.saveInvoiceItems(
           restaurantId,
-          parseResult.vendor || "Supplier",
+          parseResult.vendor || "Unknown Vendor",
           parseResult.date || new Date().toISOString().split('T')[0],
           parseResult.items || []
         );
