@@ -7,9 +7,6 @@ const anthropic = new Anthropic({
 
 export const parser = {
 
-  /**
-   * Parse normal text messages (Hinglish)
-   */
   async parseTextMessage(message: string, todayDate: string): Promise<ParsedIntent> {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks).
@@ -41,7 +38,7 @@ Example output:
   },
 
   /**
-   * Improved Media Parsing - Returns structured data + items array
+   * Supports both Photo and PDF properly
    */
   async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
     console.log(`[Parser] Starting media parsing. Type: ${mediaType || 'unknown'}`);
@@ -57,6 +54,28 @@ Example output:
 
       const buffer = await response.arrayBuffer();
       const base64Data = Buffer.from(buffer).toString('base64');
+
+      console.log(`[Parser] Downloaded size: ${(buffer.byteLength / 1024).toFixed(1)} KB`);
+
+      // Decide content block based on file type
+      const isPdf = mediaType?.includes('pdf') || mediaUrl.toLowerCase().endsWith('.pdf');
+      const contentBlock = isPdf 
+        ? {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: base64Data
+            }
+          }
+        : {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/jpeg",
+              data: base64Data
+            }
+          };
 
       const aiResponse = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
@@ -78,14 +97,7 @@ Return ONLY valid JSON with this exact structure:
   ]
 }`
             },
-            { 
-              type: "image", 
-              source: { 
-                type: "base64", 
-                media_type: "image/jpeg", 
-                data: base64Data 
-              }
-            }
+            contentBlock
           ]
         }]
       });
