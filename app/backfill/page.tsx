@@ -1,132 +1,136 @@
-"use client";
+'use client';
 
 import { useState } from 'react';
 
 export default function BackfillWizard() {
-  const [restaurantId, setRestaurantId] = useState(""); // You can make this dynamic later
-  const [entries, setEntries] = useState<any[]>([]);
+  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d'); // your restaurant ID
+  const [date, setDate] = useState('');
+  const [sales, setSales] = useState('');
+  const [hyperpure, setHyperpure] = useState('');
+  const [bigbasket, setBigbasket] = useState('');
+  const [other, setOther] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState('');
 
-  // Add a new day row
-  const addDay = () => {
-    setEntries([...entries, {
-      date: "",
-      swiggy: 0,
-      phonepe: 0,
-      hyperpure: 0,
-      bigbasket: 0,
-      milk: 0,
-      bread: 0,
-      rent: 0,
-      electricity: 0,
-      gas: 0,
-      salary: 0,
-      fixed: 0,
-      items: []
-    }]);
-  };
-
-  // Update aggregated field
-  const updateField = (index: number, field: string, value: any) => {
-    const newEntries = [...entries];
-    newEntries[index][field] = value;
-    setEntries(newEntries);
-  };
-
-  // Submit backfill
-  const handleSubmit = async () => {
-    if (!restaurantId) {
-      setMessage("Please enter Restaurant ID");
-      return;
-    }
-
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
-    setMessage("");
+    setMessage('');
+
+    const totals: any = {};
+    if (sales) totals.sales = parseFloat(sales);
+    if (hyperpure) totals.hyperpure = parseFloat(hyperpure);
+    if (bigbasket) totals.bigbasket = parseFloat(bigbasket);
+    if (other) totals.other = parseFloat(other);
+
+    const payload = {
+      restaurant_id: restaurantId,
+      entries: [{
+        date: date,
+        totals: totals
+      }]
+    };
 
     try {
       const res = await fetch('/api/backfill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          restaurant_id: restaurantId,
-          entries: entries
-        })
+        body: JSON.stringify(payload)
       });
 
-      const result = await res.json();
+      const data = await res.json();
 
-      if (result.success) {
-        setMessage(`✅ Successfully backfilled ${result.results.length} days!`);
-        // Optionally clear form
+      if (data.success) {
+        setMessage('✅ Backfill saved successfully!');
+        // Clear form
+        setSales('');
+        setHyperpure('');
+        setBigbasket('');
+        setOther('');
       } else {
-        setMessage(`❌ Error: ${result.error}`);
+        setMessage('❌ Error: ' + (data.error || 'Unknown error'));
       }
     } catch (err) {
-      setMessage("Failed to connect to server");
+      setMessage('❌ Failed to connect to server');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Backfill Wizard</h1>
+    <div className="max-w-2xl mx-auto p-8">
+      <h1 className="text-3xl font-bold mb-2">Backfill Wizard</h1>
+      <p className="text-gray-600 mb-8">Quickly add historical data for your restaurant</p>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Restaurant ID</label>
-        <input
-          type="text"
-          value={restaurantId}
-          onChange={(e) => setRestaurantId(e.target.value)}
-          className="border p-3 w-full rounded-lg"
-          placeholder="Enter restaurant UUID"
-        />
-      </div>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label className="block text-sm font-medium mb-1">Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-4 py-3"
+            required
+          />
+        </div>
 
-      <button
-        onClick={addDay}
-        className="bg-blue-600 text-white px-6 py-3 rounded-lg mb-6"
-      >
-        + Add New Day
-      </button>
-
-      <div className="space-y-8">
-        {entries.map((entry, index) => (
-          <div key={index} className="border p-6 rounded-xl bg-gray-50">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Sales / Revenue</label>
             <input
-              type="date"
-              value={entry.date}
-              onChange={(e) => updateField(index, 'date', e.target.value)}
-              className="border p-3 rounded-lg mb-4"
+              type="number"
+              value={sales}
+              onChange={(e) => setSales(e.target.value)}
+              placeholder="3500"
+              className="w-full border border-gray-300 rounded-lg px-4 py-3"
             />
-
-            {/* Aggregated Totals */}
-            <div className="grid grid-cols-6 gap-4 mb-6">
-              <input type="number" placeholder="Swiggy" value={entry.swiggy} onChange={(e) => updateField(index, 'swiggy', Number(e.target.value))} className="border p-3 rounded-lg" />
-              <input type="number" placeholder="PhonePe" value={entry.phonepe} onChange={(e) => updateField(index, 'phonepe', Number(e.target.value))} className="border p-3 rounded-lg" />
-              <input type="number" placeholder="Hyperpure" value={entry.hyperpure} onChange={(e) => updateField(index, 'hyperpure', Number(e.target.value))} className="border p-3 rounded-lg" />
-              <input type="number" placeholder="Bigbasket" value={entry.bigbasket} onChange={(e) => updateField(index, 'bigbasket', Number(e.target.value))} className="border p-3 rounded-lg" />
-              <input type="number" placeholder="Milk" value={entry.milk} onChange={(e) => updateField(index, 'milk', Number(e.target.value))} className="border p-3 rounded-lg" />
-              <input type="number" placeholder="Bread" value={entry.bread} onChange={(e) => updateField(index, 'bread', Number(e.target.value))} className="border p-3 rounded-lg" />
-            </div>
-
-            {/* Item Level - Future enhancement */}
-            <p className="text-sm text-gray-500">Item-level data support coming soon in this UI.</p>
           </div>
-        ))}
-      </div>
 
-      <button
-        onClick={handleSubmit}
-        disabled={loading}
-        className="mt-8 bg-green-600 text-white px-8 py-4 rounded-xl text-lg font-semibold disabled:bg-gray-400"
-      >
-        {loading ? "Saving..." : "Save All Data"}
-      </button>
+          <div>
+            <label className="block text-sm font-medium mb-1">Hyperpure</label>
+            <input
+              type="number"
+              value={hyperpure}
+              onChange={(e) => setHyperpure(e.target.value)}
+              placeholder="2400"
+              className="w-full border border-gray-300 rounded-lg px-4 py-3"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">BigBasket</label>
+            <input
+              type="number"
+              value={bigbasket}
+              onChange={(e) => setBigbasket(e.target.value)}
+              placeholder="1650"
+              className="w-full border border-gray-300 rounded-lg px-4 py-3"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Other / Metro / Instamart</label>
+            <input
+              type="number"
+              value={other}
+              onChange={(e) => setOther(e.target.value)}
+              placeholder="800"
+              className="w-full border border-gray-300 rounded-lg px-4 py-3"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-4 rounded-xl disabled:opacity-50"
+        >
+          {loading ? 'Saving...' : 'Save Backfill Entry'}
+        </button>
+      </form>
 
       {message && (
-        <div className="mt-6 p-4 bg-gray-100 rounded-lg">
+        <div className="mt-6 p-4 bg-gray-100 rounded-xl text-center">
           {message}
         </div>
       )}
