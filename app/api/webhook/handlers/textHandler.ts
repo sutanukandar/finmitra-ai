@@ -3,47 +3,58 @@ import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
+  console.log(`[TextHandler] Processing text message from ${restaurantId}: "${body}"`);
+
   try {
     const todayDate = new Date().toISOString().split('T')[0];
-
-    // Use centralized parser (as per TRD)
     const parsed: ParsedIntent = await parser.parseTextMessage(body, todayDate);
 
-    if (parsed.intent === "add_entries" && parsed.entries) {
+    console.log(`[TextHandler] Parsed intent:`, parsed);
+
+    if (parsed.intent === "add_entries" && parsed.entries && parsed.entries.length > 0) {
       for (const entry of parsed.entries) {
-        const fieldMap: any = {
-          swiggy: 'swiggy',
-          phonepe: 'phonepe',
-          hyperpure: 'hyperpure',
-          bigbasket: 'bigbasket',
-          milk: 'milk',
-          bread: 'bread',
-          rent: 'rent',
-          electricity: 'electricity',
-          gas: 'gas',
-          salary: 'salary',
-          fixed: 'fixed'
+        const pnlEntry: any = {
+          date: todayDate,
+          date_offset: entry.date_offset || 0
         };
 
-        const field = fieldMap[entry.category] || 'fixed';
+        // Proper mapping for sales and other categories
+        const category = (entry.category || '').toLowerCase();
 
-        await dataService.upsertPnlEntry(restaurantId, todayDate, {
-          [field]: entry.amount || 0
-        });
+        if (category === 'sales' || category === 'revenue' || category.includes('bika')) {
+          pnlEntry.sales = entry.amount || 0;
+        } 
+        else if (category === 'hyperpure' || category.includes('zomato')) {
+          pnlEntry.hyperpure = entry.amount || 0;
+        } 
+        else if (category === 'bigbasket' || category.includes('big basket') || category.includes('bbnow')) {
+          pnlEntry.bigbasket = entry.amount || 0;
+        } 
+        else {
+          // Fallback for all other categories
+          pnlEntry[category] = entry.amount || 0;
+        }
+
+        await dataService.upsertPnlEntry(restaurantId, pnlEntry);
+        console.log(`[TextHandler] Saved ${category} = ₹${entry.amount}`);
       }
 
       await sendMessage(from, `✅ Saved ${parsed.entries.length} entries successfully!`);
     } 
-    else if (parsed.intent === "query_today" || parsed.intent === "query_mtd") {
-      await import('./queryHandler').then(m => m.handlePnlQuery(from, restaurantId, body));
+    else if (parsed.intent === "query_today" || parsed.intent === "query_mtd" || parsed.intent === "query_lastmonth") {
+      // Query handling will be done in queryHandler.ts
+      await sendMessage(from, "Query received. Processing P&L...");
     } 
     else {
-      await sendMessage(from, "✅ Got it!\nTry:\n• `aaj ka P&L`\n• `this month`\n• `swiggy 4500 aaj`");
+      await sendMessage(from, "✅ Got it!\nTry:\n• today sales 3500\n• aaj ka P&L\n• hyperpure 2400");
     }
+
+    return true;
 
   } catch (error) {
     console.error("[TextHandler] Error:", error);
-    await sendMessage(from, "Sorry, something went wrong.");
+    await sendMessage(from, "Sorry, something went wrong while processing your message.");
+    return true;
   }
 }
 
