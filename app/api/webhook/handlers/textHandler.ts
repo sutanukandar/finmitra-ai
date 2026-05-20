@@ -13,14 +13,18 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
     if (parsed.intent === "add_entries" && parsed.entries && parsed.entries.length > 0) {
       for (const entry of parsed.entries) {
+        // Calculate actual date from date_offset
+        const entryDate = new Date();
+        entryDate.setDate(entryDate.getDate() + (entry.date_offset || 0));
+        const finalDate = entryDate.toISOString().split('T')[0];
+
+        const category = (entry.category || '').toLowerCase().trim();
+
         const pnlEntry: any = {
-          date: todayDate,
-          date_offset: entry.date_offset || 0
+          date: finalDate
         };
 
-        // Proper mapping for sales and other categories
-        const category = (entry.category || '').toLowerCase();
-
+        // Proper mapping
         if (category === 'sales' || category === 'revenue' || category.includes('bika')) {
           pnlEntry.sales = entry.amount || 0;
         } 
@@ -31,22 +35,21 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           pnlEntry.bigbasket = entry.amount || 0;
         } 
         else {
-          // Fallback for all other categories
+          // All other categories go to their respective column (or fixed as fallback)
           pnlEntry[category] = entry.amount || 0;
         }
 
         await dataService.upsertPnlEntry(restaurantId, pnlEntry);
-        console.log(`[TextHandler] Saved ${category} = ₹${entry.amount}`);
+        console.log(`[TextHandler] Saved ${category} = ₹${entry.amount} for date ${finalDate}`);
       }
 
       await sendMessage(from, `✅ Saved ${parsed.entries.length} entries successfully!`);
     } 
     else if (parsed.intent === "query_today" || parsed.intent === "query_mtd" || parsed.intent === "query_lastmonth") {
-      // Query handling will be done in queryHandler.ts
       await sendMessage(from, "Query received. Processing P&L...");
     } 
     else {
-      await sendMessage(from, "✅ Got it!\nTry:\n• today sales 3500\n• aaj ka P&L\n• hyperpure 2400");
+      await sendMessage(from, "✅ Got it!\nTry:\n• today sales 3500\n• aaj sales 4200\n• aaj ka P&L");
     }
 
     return true;
