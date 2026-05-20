@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dataService } from '../../lib/db/dataService';
+import { dataService } from '../../../lib/db/dataService';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     for (const entry of entries) {
       const { date, totals, items } = entry;
 
-      // 1. Save aggregated totals (if provided)
+      // Save aggregated totals
       if (totals && Object.keys(totals).length > 0) {
         const { success } = await dataService.upsertPnlEntry(restaurant_id, {
           date: date,
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
         results.push({ date, type: "totals", success });
       }
 
-      // 2. Save item-level data (if provided)
+      // Save item-level data
       if (items && Array.isArray(items) && items.length > 0) {
         await dataService.saveInvoiceItems(
           restaurant_id,
