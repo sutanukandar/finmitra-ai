@@ -1,49 +1,121 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dataService } from '../../../lib/db/dataService';
+import * as XLSX from 'xlsx';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { restaurant_id, entries } = body;
+    const contentType = req.headers.get('content-type') || '';
 
-    if (!restaurant_id || !entries || !Array.isArray(entries)) {
-      return NextResponse.json({ error: "Missing restaurant_id or entries array" }, { status: 400 });
+    // JSON mode - Manual form
+    if (contentType.includes('application/json')) {
+      const body = await req.json();
+      const { restaurant_id, entries } = body;
+
+      if (!restaurant_id || !entries || !Array.isArray(entries)) {
+        return NextResponse.json({ error: "Missing restaurant_id or entries array" }, { status: 400 });
+      }
+
+      return await processEntries(restaurant_id, entries);
     }
 
-    const results = [];
+    // Excel / CSV upload mode
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    const restaurant_id = formData.get('restaurant_id') as string;
 
-    for (const entry of entries) {
-      const { date, totals, items } = entry;
+    if (!file || !restaurant_id) {
+      return NextResponse.json({ error: "File and restaurant_id are required" }, { status: 400 });
+    }
 
-      // Save aggregated totals
-      if (totals && Object.keys(totals).length > 0) {
-        const { success } = await dataService.upsertPnlEntry(restaurant_id, {
-          date: date,
-          ...totals
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+
+    const entries: any[] = [];
+
+    // Sheet 1: Daily Totals
+    const totalsSheet = workbook.Sheets['Daily Totals'] || workbook.Sheets['Sheet1'];
+    if (totalsSheet) {
+      const data = XLSX.utils.sheet_to_json(totalsSheet);
+      data.forEach((row: any) => {
+        entries.push({
+          date: row.date,
+          totals: {
+            sales: row.sales_qr || row.sales || 0,
+            hyperpure: row.hyperpure || 0,
+            bigbasket: row.bigbasket || 0,
+            other: row.other || 0,
+          }
         });
-        results.push({ date, type: "totals", success });
-      }
-
-      // Save item-level data
-      if (items && Array.isArray(items) && items.length > 0) {
-        await dataService.saveInvoiceItems(
-          restaurant_id,
-          entry.vendor || "Backfill",
-          date,
-          items
-        );
-        results.push({ date, type: "items", count: items.length, success: true });
-      }
+      });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Backfill completed successfully",
-      results
-    });
+    // Sheet 2: Item Level Bills
+    const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
+    if (itemsSheet) {
+      const data = XLSX.utils.sheet_to_json(itemsSheet);
+      const grouped: any = {};
+
+      data.forEach((row: any) => {
+        if (!grouped[row.date]) grouped[row.date] = [];
+        grouped[row.date].push({
+          item_name: row.item_name,
+          quantity: row.quantity || 1,
+          unit: row.unit || '',
+          amount: row.amount,
+          vendor: row.vendor || 'Backfill'
+        });
+      });
+
+      Object.keys(grouped).forEach(date => {
+        entries.push({
+          date: date,
+          items: grouped[date]
+        });
+      });
+    }
+
+    if (entries.length === 0) {
+      return NextResponse.json({ error: "No valid data found in the uploaded file" }, { status: 400 });
+    }
+
+    return await processEntries(restaurant_id, entries);
 
   } catch (error: any) {
-    console.error("[Backfill] Error:", error);
+    console.error("[Backfill API] Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+}
+
+async function processEntries(restaurant_id: string, entries: any[]) {
+  const results = [];
+
+  for (const entry of entries) {
+    const { date, totals, items } = entry;
+
+    // Save aggregated totals
+    if (totals && Object.keys(totals).length > 0) {
+      const { success } = await dataService.upsertPnlEntry(restaurant_id, {
+        date: date,
+        ...totals
+      });
+      results.push({ date, type: "totals", success });
+    }
+
+    // Save item-level data
+    if (items && Array.isArray(items) && items.length > 0) {
+      await dataService.saveInvoiceItems(
+        restaurant_id,
+        entry.vendor || "Backfill",
+        date,
+        items
+      );
+      results.push({ date, type: "items", count: items.length, success: true });
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: "Backfill completed successfully",
+    results
+  });
 }
