@@ -2,15 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dataService } from '../../../lib/db/dataService';
 import * as XLSX from 'xlsx';
 
-// Helper to convert Excel serial date to YYYY-MM-DD
-function excelDateToISO(serial: any): string {
-  if (!serial) return new Date().toISOString().split('T')[0];
-  if (typeof serial === 'string' && serial.includes('-')) return serial;
+// Robust Excel serial date to YYYY-MM-DD converter
+function excelDateToISO(value: any): string {
+  if (!value) return new Date().toISOString().split('T')[0];
 
-  const utc_days = Math.floor(Number(serial) - 25569);
-  const utc_value = utc_days * 86400;
-  const date_info = new Date(utc_value * 1000);
-  return date_info.toISOString().split('T')[0];
+  if (typeof value === 'string') {
+    if (value.includes('-')) return value.split('T')[0];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  }
+
+  const serial = Number(value);
+  if (!isNaN(serial) && serial > 0) {
+    const utc_days = Math.floor(serial - 25569);
+    const date = new Date(utc_days * 86400 * 1000);
+    return date.toISOString().split('T')[0];
+  }
+
+  return new Date().toISOString().split('T')[0];
 }
 
 export async function POST(req: NextRequest) {
@@ -51,16 +59,25 @@ export async function POST(req: NextRequest) {
         entries.push({
           date: date,
           totals: {
-            sales: row.sales_qr || row.sales || 0,
+            // FIXED: Combine sales_qr + sales_cash into 'sales'
+            sales: (Number(row.sales_qr) || 0) + (Number(row.sales_cash) || 0),
+            swiggy: row.swiggy || 0,
+            zomato: row.zomato || 0,
             hyperpure: row.hyperpure || 0,
             bigbasket: row.bigbasket || 0,
+            milk: row.milk || 0,
+            bread: row.bread || 0,
+            rent: row.rent || 0,
+            electricity: row.electricity || 0,
+            gas: row.gas || 0,
+            salary: row.salary || 0,
             other: row.other || 0,
           }
         });
       });
     }
 
-    // Sheet 2: Item Level
+    // Sheet 2: Item Level (unchanged)
     const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
     if (itemsSheet) {
       const data = XLSX.utils.sheet_to_json(itemsSheet);
