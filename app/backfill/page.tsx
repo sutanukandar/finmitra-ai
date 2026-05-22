@@ -7,13 +7,13 @@ export default function BackfillWizard() {
   const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d');
   const [date, setDate] = useState('');
 
-  // Revenue fields
+  // Revenue
   const [salesQR, setSalesQR] = useState('');
   const [salesCash, setSalesCash] = useState('');
   const [swiggy, setSwiggy] = useState('');
   const [zomato, setZomato] = useState('');
 
-  // Expense fields
+  // Expenses
   const [hyperpure, setHyperpure] = useState('');
   const [bigbasket, setBigbasket] = useState('');
   const [milk, setMilk] = useState('');
@@ -28,7 +28,7 @@ export default function BackfillWizard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // Download PnL Template (Daily Totals only)
+  // Download Templates
   const downloadPnlTemplate = () => {
     const wb = XLSX.utils.book_new();
     const data = [
@@ -40,7 +40,6 @@ export default function BackfillWizard() {
     XLSX.writeFile(wb, 'finmitra-pnl-template.xlsx');
   };
 
-  // Download Invoice Template (Item Level only)
   const downloadInvoiceTemplate = () => {
     const wb = XLSX.utils.book_new();
     const data = [
@@ -100,6 +99,7 @@ export default function BackfillWizard() {
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
+
     setLoading(true);
     setMessage('');
 
@@ -136,25 +136,16 @@ export default function BackfillWizard() {
   return (
     <div className="max-w-5xl mx-auto p-8">
       <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-4xl font-bold">Backfill Wizard</h1>
-          <p className="text-gray-600">Add historical data quickly</p>
-        </div>
+        <h1 className="text-4xl font-bold">Backfill Wizard</h1>
       </div>
 
       {/* Download Template Buttons */}
       <div className="flex gap-4 mb-10">
-        <button
-          onClick={downloadPnlTemplate}
-          className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2"
-        >
-          📊 Download PnL Template<br/>(Daily Totals)
+        <button onClick={downloadPnlTemplate} className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2">
+          📊 Download PnL Template
         </button>
-        <button
-          onClick={downloadInvoiceTemplate}
-          className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2"
-        >
-          📋 Download Invoice Template<br/>(Item Level Bills)
+        <button onClick={downloadInvoiceTemplate} className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2">
+          📋 Download Invoice Template
         </button>
       </div>
 
@@ -213,15 +204,25 @@ export default function BackfillWizard() {
 
         {/* Bulk Upload */}
         <div>
-          <h2 className="text-2xl font-semibold mb-6">Bulk Upload via Excel / CSV</h2>
+          <h2 className="text-2xl font-semibold mb-6">Bulk Upload (Excel/CSV)</h2>
           <form onSubmit={handleFileUpload} className="border-2 border-dashed border-gray-300 rounded-3xl p-8 text-center">
-            <input type="file" accept=".xlsx,.csv" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" id="file-upload" />
+            <input 
+              type="file" 
+              accept=".xlsx,.csv" 
+              onChange={(e) => {
+                const selectedFile = e.target.files?.[0] || null;
+                setFile(selectedFile);
+                console.log('File selected:', selectedFile?.name);
+              }} 
+              className="hidden" 
+              id="file-upload" 
+            />
             <label htmlFor="file-upload" className="cursor-pointer block">
               <div className="text-6xl mb-4">📤</div>
               <p className="font-medium">Drop your Excel or CSV file here</p>
               <p className="text-sm text-gray-500 mt-2">or click to browse</p>
             </label>
-            {file && <p className="mt-4 text-sm text-green-600">Selected: {file.name}</p>}
+            {file && <p className="mt-6 text-sm text-green-600 font-medium">Selected: {file.name}</p>}
             <button type="submit" disabled={!file || loading} className="mt-8 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-5 rounded-2xl text-lg disabled:opacity-50">
               {loading ? 'Uploading...' : 'Upload & Backfill'}
             </button>
