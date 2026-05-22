@@ -1,19 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import * as XLSX from 'xlsx';
 
-export default function BackfillWizard() {
-  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d');
+export default function BackfillPage() {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d'); // Your test restaurant ID
+
+  // Manual entry states
   const [date, setDate] = useState('');
-
-  // Revenue
-  const [salesQR, setSalesQR] = useState('');
+  const [salesQr, setSalesQr] = useState('');
   const [salesCash, setSalesCash] = useState('');
   const [swiggy, setSwiggy] = useState('');
   const [zomato, setZomato] = useState('');
-
-  // Expenses
   const [hyperpure, setHyperpure] = useState('');
   const [bigbasket, setBigbasket] = useState('');
   const [milk, setMilk] = useState('');
@@ -24,32 +24,51 @@ export default function BackfillWizard() {
   const [salary, setSalary] = useState('');
   const [other, setOther] = useState('');
 
-  const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-
-  // Download Templates
-  const downloadPnlTemplate = () => {
-    const wb = XLSX.utils.book_new();
-    const data = [
-      ['date', 'sales_qr', 'sales_cash', 'swiggy', 'zomato', 'hyperpure', 'bigbasket', 'milk', 'bread', 'rent', 'electricity', 'gas', 'salary', 'other'],
-      ['2026-05-20', '3500', '1200', '800', '600', '2400', '1650', '360', '180', '0', '450', '0', '1200', '300']
-    ];
-    const sheet = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, sheet, "Daily Totals");
-    XLSX.writeFile(wb, 'finmitra-pnl-template.xlsx');
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedFile(file);
+    if (file) {
+      console.log('✅ File selected:', file.name);
+    }
   };
 
-  const downloadInvoiceTemplate = () => {
-    const wb = XLSX.utils.book_new();
-    const data = [
-      ['date', 'vendor', 'item_name', 'quantity', 'unit', 'amount'],
-      ['2026-05-20', 'Hyperpure', 'VIVI - Honey, 1 Kg', '2', 'Kg', '420'],
-      ['2026-05-20', 'BigBasket', 'Bru Coffee Powder 500gm', '1', 'Pc', '595']
-    ];
-    const sheet = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, sheet, "Item Level");
-    XLSX.writeFile(wb, 'finmitra-invoice-template.xlsx');
+  const handleFileUpload = async () => {
+    if (!selectedFile) return;
+
+    setLoading(true);
+    setMessage('');
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('restaurant_id', restaurantId);
+
+    try {
+      const res = await fetch('/api/backfill', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setMessage(`✅ Success! ${data.results?.length || 0} entries processed.`);
+        setSelectedFile(null);
+      } else {
+        setMessage(`❌ Error: ${data.error}`);
+      }
+    } catch (err: any) {
+      setMessage(`❌ Upload failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadTemplate = (type: 'pnl' | 'invoice') => {
+    const link = document.createElement('a');
+    link.href = type === 'pnl' 
+      ? '/templates/finmitra-pnl-template.xlsx' 
+      : '/templates/finmitra-invoice-template.xlsx';
+    link.download = type === 'pnl' ? 'finmitra-pnl-template.xlsx' : 'finmitra-invoice-template.xlsx';
+    link.click();
   };
 
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -57,184 +76,149 @@ export default function BackfillWizard() {
     setLoading(true);
     setMessage('');
 
-    const totals: any = {};
-    if (salesQR || salesCash) totals.sales = (parseFloat(salesQR) || 0) + (parseFloat(salesCash) || 0);
-    if (swiggy) totals.swiggy = parseFloat(swiggy);
-    if (zomato) totals.zomato = parseFloat(zomato);
-    if (hyperpure) totals.hyperpure = parseFloat(hyperpure);
-    if (bigbasket) totals.bigbasket = parseFloat(bigbasket);
-    if (milk) totals.milk = parseFloat(milk);
-    if (bread) totals.bread = parseFloat(bread);
-    if (rent) totals.rent = parseFloat(rent);
-    if (electricity) totals.electricity = parseFloat(electricity);
-    if (gas) totals.gas = parseFloat(gas);
-    if (salary) totals.salary = parseFloat(salary);
-    if (other) totals.other = parseFloat(other);
-
     const payload = {
       restaurant_id: restaurantId,
-      entries: [{ date, totals }]
+      entries: [{
+        date,
+        totals: {
+          sales: Number(salesQr || 0) + Number(salesCash || 0),
+          swiggy: Number(swiggy || 0),
+          zomato: Number(zomato || 0),
+          hyperpure: Number(hyperpure || 0),
+          bigbasket: Number(bigbasket || 0),
+          milk: Number(milk || 0),
+          bread: Number(bread || 0),
+          rent: Number(rent || 0),
+          electricity: Number(electricity || 0),
+          gas: Number(gas || 0),
+          salary: Number(salary || 0),
+          other: Number(other || 0),
+        }
+      }]
     };
 
     try {
       const res = await fetch('/api/backfill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
-        setMessage('✅ Backfill saved successfully!');
-        clearForm();
+        setMessage('✅ Manual entry saved successfully!');
+        // Clear form
+        setDate(''); setSalesQr(''); setSalesCash(''); setSwiggy(''); setZomato('');
+        setHyperpure(''); setBigbasket(''); setMilk(''); setBread(''); setRent('');
+        setElectricity(''); setGas(''); setSalary(''); setOther('');
       } else {
-        setMessage('❌ ' + (data.error || 'Failed to save'));
+        setMessage(`❌ ${data.error}`);
       }
-    } catch (err) {
-      setMessage('❌ Server error');
+    } catch (err: any) {
+      setMessage(`❌ ${err.message}`);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFileUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) return;
-
-    setLoading(true);
-    setMessage('');
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('restaurant_id', restaurantId);
-
-    try {
-      const res = await fetch('/api/backfill', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (data.success) {
-        setMessage(`✅ ${data.results.length} entries saved successfully!`);
-        setFile(null);
-      } else {
-        setMessage('❌ ' + (data.error || 'Upload failed'));
-      }
-    } catch (err) {
-      setMessage('❌ Failed to upload file');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const clearForm = () => {
-    setDate('');
-    setSalesQR(''); setSalesCash(''); setSwiggy(''); setZomato('');
-    setHyperpure(''); setBigbasket(''); setMilk(''); setBread('');
-    setRent(''); setElectricity(''); setGas(''); setSalary(''); setOther('');
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-4xl font-bold">Backfill Wizard</h1>
-      </div>
+    <div className="max-w-4xl mx-auto p-8">
+      <h1 className="text-3xl font-bold mb-8">FinMitra Backfill Wizard</h1>
 
-      {/* Download Template Buttons */}
-      <div className="flex gap-4 mb-10">
-        <button onClick={downloadPnlTemplate} className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2">
-          📊 Download PnL Template
-        </button>
-        <button onClick={downloadInvoiceTemplate} className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 px-6 py-4 rounded-2xl font-medium flex items-center justify-center gap-2">
-          📋 Download Invoice Template
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-        {/* Manual Entry */}
-        <div>
-          <h2 className="text-2xl font-semibold mb-6">Manual Entry</h2>
-          <form onSubmit={handleManualSubmit} className="space-y-8">
-            <div>
-              <label className="block text-sm font-medium mb-2">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" required />
-            </div>
-
-            <div>
-              <h3 className="text-lg font-semibold mb-4 text-green-700">Revenue / Sales</h3>
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Sales (QR)</label>
-                  <input type="number" value={salesQR} onChange={(e) => setSalesQR(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" placeholder="2500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Sales (Cash)</label>
-                  <input type="number" value={salesCash} onChange={(e) => setSalesCash(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" placeholder="1000" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Swiggy</label>
-                  <input type="number" value={swiggy} onChange={(e) => setSwiggy(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-2">Zomato</label>
-                  <input type="number" value={zomato} onChange={(e) => setZomato(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" />
-                </div>
+      {/* Manual Entry */}
+      <form onSubmit={handleManualSubmit} className="bg-white p-6 rounded-xl shadow mb-10">
+        <h2 className="text-xl font-semibold mb-4">Manual Daily Entry</h2>
+        <div className="grid grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium mb-1">Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-3 border rounded-lg" required />
+          </div>
+          {/* Revenue Section */}
+          <div className="col-span-2">
+            <h3 className="font-medium mb-3 text-green-700">Revenue / Sales</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm">Sales (QR)</label>
+                <input type="number" value={salesQr} onChange={(e) => setSalesQr(e.target.value)} className="w-full p-3 border rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm">Sales (Cash)</label>
+                <input type="number" value={salesCash} onChange={(e) => setSalesCash(e.target.value)} className="w-full p-3 border rounded-lg" />
               </div>
             </div>
-
-            <div>
-              <h3 className="text-lg font-semibold mb-4 text-red-700">Expenses</h3>
-              <div className="grid grid-cols-2 gap-6">
-                <div><label className="block text-sm font-medium mb-2">Hyperpure</label><input type="number" value={hyperpure} onChange={(e) => setHyperpure(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">BigBasket</label><input type="number" value={bigbasket} onChange={(e) => setBigbasket(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Milk</label><input type="number" value={milk} onChange={(e) => setMilk(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Bread</label><input type="number" value={bread} onChange={(e) => setBread(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Rent</label><input type="number" value={rent} onChange={(e) => setRent(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Electricity</label><input type="number" value={electricity} onChange={(e) => setElectricity(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Gas</label><input type="number" value={gas} onChange={(e) => setGas(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Salary</label><input type="number" value={salary} onChange={(e) => setSalary(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-                <div><label className="block text-sm font-medium mb-2">Metro / Instamart / Local</label><input type="number" value={other} onChange={(e) => setOther(e.target.value)} className="w-full border border-gray-300 rounded-xl px-5 py-4" /></div>
-              </div>
+          </div>
+          {/* Expenses */}
+          <div className="col-span-2">
+            <h3 className="font-medium mb-3 text-red-700">Expenses</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <input placeholder="Swiggy" value={swiggy} onChange={(e) => setSwiggy(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Zomato" value={zomato} onChange={(e) => setZomato(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Hyperpure" value={hyperpure} onChange={(e) => setHyperpure(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="BigBasket" value={bigbasket} onChange={(e) => setBigbasket(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Milk" value={milk} onChange={(e) => setMilk(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Bread" value={bread} onChange={(e) => setBread(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Rent" value={rent} onChange={(e) => setRent(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Electricity" value={electricity} onChange={(e) => setElectricity(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Gas" value={gas} onChange={(e) => setGas(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Salary" value={salary} onChange={(e) => setSalary(e.target.value)} className="p-3 border rounded-lg" />
+              <input placeholder="Other" value={other} onChange={(e) => setOther(e.target.value)} className="p-3 border rounded-lg" />
             </div>
+          </div>
+        </div>
+        <button type="submit" disabled={loading} className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-medium">
+          {loading ? 'Saving...' : 'Save Manual Entry'}
+        </button>
+      </form>
 
-            <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-5 rounded-2xl text-lg disabled:opacity-50">
-              {loading ? 'Saving...' : 'Save Manual Entry'}
-            </button>
-          </form>
+      {/* Bulk Upload */}
+      <div className="bg-white p-6 rounded-xl shadow">
+        <h2 className="text-xl font-semibold mb-4">Bulk Upload (Excel / CSV)</h2>
+
+        <div className="flex gap-4 mb-6">
+          <button onClick={() => downloadTemplate('pnl')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-medium">
+            📥 Download PnL Template
+          </button>
+          <button onClick={() => downloadTemplate('invoice')} className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-medium">
+            📥 Download Invoice Template
+          </button>
         </div>
 
-        {/* Bulk Upload */}
-        <div>
-          <h2 className="text-2xl font-semibold mb-6">Bulk Upload (Excel/CSV)</h2>
-          <form onSubmit={handleFileUpload} className="border-2 border-dashed border-gray-300 rounded-3xl p-8 text-center">
-            <input 
-              type="file" 
-              accept=".xlsx,.csv" 
-              onChange={(e) => {
-                const selectedFile = e.target.files?.[0] || null;
-                setFile(selectedFile);
-                console.log('File selected:', selectedFile?.name);
-              }} 
-              className="hidden" 
-              id="file-upload" 
-            />
-            <label htmlFor="file-upload" className="cursor-pointer block">
-              <div className="text-6xl mb-4">📤</div>
-              <p className="font-medium">Drop your Excel or CSV file here</p>
-              <p className="text-sm text-gray-500 mt-2">or click to browse</p>
-            </label>
-            {file && <p className="mt-6 text-sm text-green-600 font-medium">Selected: {file.name}</p>}
-            <button type="submit" disabled={!file || loading} className="mt-8 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-5 rounded-2xl text-lg disabled:opacity-50">
-              {loading ? 'Uploading...' : 'Upload & Backfill'}
-            </button>
-          </form>
+        <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleFileChange}
+            className="hidden"
+            id="file-upload"
+          />
+          <label htmlFor="file-upload" className="cursor-pointer block">
+            <div className="text-4xl mb-2">📤</div>
+            <p className="font-medium">Click to select Excel / CSV file</p>
+            {selectedFile && (
+              <p className="mt-4 text-green-600 font-medium">
+                ✅ Selected: {selectedFile.name}
+              </p>
+            )}
+          </label>
         </div>
+
+        <button
+          onClick={handleFileUpload}
+          disabled={!selectedFile || loading}
+          className={`mt-6 w-full py-4 rounded-xl font-medium text-white transition-all ${
+            selectedFile && !loading
+              ? 'bg-blue-600 hover:bg-blue-700'
+              : 'bg-gray-300 cursor-not-allowed'
+          }`}
+        >
+          {loading ? 'Uploading...' : 'Upload File Now'}
+        </button>
+
+        {message && (
+          <div className={`mt-4 p-4 rounded-xl text-center font-medium ${message.includes('✅') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+            {message}
+          </div>
+        )}
       </div>
-
-      {message && (
-        <div className="mt-10 p-6 bg-gray-100 rounded-3xl text-center text-lg font-medium">
-          {message}
-        </div>
-      )}
     </div>
   );
 }
