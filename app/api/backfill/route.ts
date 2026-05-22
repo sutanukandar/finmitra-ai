@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dataService } from '../../../lib/db/dataService';
 import * as XLSX from 'xlsx';
 
-// Robust Excel date converter
+// Robust Excel date converter (handles serial dates + real dates)
 function excelDateToISO(value: any): string {
   if (!value) return new Date().toISOString().split('T')[0];
 
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       return await processEntries(restaurant_id, entries);
     }
 
-    // Excel / CSV upload
+    // Excel upload
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const restaurant_id = formData.get('restaurant_id') as string;
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const entries: any[] = [];
 
-    // 1. Daily Totals sheet (PnL level)
+    // 1. Daily Totals sheet (unchanged)
     const totalsSheet = workbook.Sheets['Daily Totals'] || workbook.Sheets['Sheet1'];
     if (totalsSheet) {
       const data = XLSX.utils.sheet_to_json(totalsSheet);
@@ -75,29 +75,39 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Item Level sheet — FIXED
+    // 2. Item Level sheet — FIXED + PnL aggregation
     const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
     if (itemsSheet) {
       const data = XLSX.utils.sheet_to_json(itemsSheet);
-      const grouped: { [date: string]: any[] } = {};
+
+      // Group by date for PnL total
+      const dateTotals: { [date: string]: number } = {};
 
       data.forEach((row: any) => {
         const date = excelDateToISO(row.date);
-        if (!grouped[date]) grouped[date] = [];
+        const amount = Number(row.amount) || 0;
 
-        grouped[date].push({
-          item_name: row.item_name || row.Item || row.item || 'Unknown Item',
-          quantity: Number(row.quantity) || 1,
-          unit: row.unit || '',
-          amount: Number(row.amount) || 0,
-          vendor: row.vendor || row.Vendor || 'Unknown'   // ← THIS WAS THE BUG
+        if (!dateTotals[date]) dateTotals[date] = 0;
+        dateTotals[date] += amount;
+
+        // Save individual item (exact match)
+        entries.push({
+          date,
+          items: [{
+            item_name: row.item_name || row.Item || row.item || 'Unknown Item',
+            quantity: Number(row.quantity) || 1,
+            unit: row.unit || '',
+            amount: amount,
+            vendor: row.vendor || row.Vendor || 'Unknown'
+          }]
         });
       });
 
-      Object.keys(grouped).forEach(date => {
+      // Create PnL entry for each date (aggregated total)
+      Object.keys(dateTotals).forEach(date => {
         entries.push({
           date,
-          items: grouped[date]
+          totals: { other: dateTotals[date] }   // ← Total of all items goes here
         });
       });
     }
@@ -129,10 +139,9 @@ async function processEntries(restaurant_id: string, entries: any[]) {
       results.push({ date, type: "totals", success });
     }
 
-    // Save item-level data (the main fix)
+    // Save item-level rows (exact vendor preserved)
     if (items && Array.isArray(items) && items.length > 0) {
-      // Use first item's vendor or fallback
-      const vendor = items[0]?.vendor || 'Backfill';
+      const vendor = items[0].vendor || 'Backfill';
       await dataService.saveInvoiceItems(restaurant_id, vendor, date, items);
       results.push({ date, type: "items", count: items.length, success: true });
     }
@@ -140,7 +149,7 @@ async function processEntries(restaurant_id: string, entries: any[]) {
 
   return NextResponse.json({
     success: true,
-    message: "✅ Backfill completed successfully (both tables updated)",
+    message: "✅ Backfill completed! Both invoice_items and pnl_entries updated.",
     results
   });
 }
