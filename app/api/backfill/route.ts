@@ -59,7 +59,6 @@ export async function POST(req: NextRequest) {
         entries.push({
           date: date,
           totals: {
-            // FIXED: Combine sales_qr + sales_cash into 'sales'
             sales: (Number(row.sales_qr) || 0) + (Number(row.sales_cash) || 0),
             swiggy: row.swiggy || 0,
             zomato: row.zomato || 0,
@@ -77,7 +76,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Sheet 2: Item Level (unchanged)
+    // Sheet 2: Item Level - FIXED
     const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
     if (itemsSheet) {
       const data = XLSX.utils.sheet_to_json(itemsSheet);
@@ -87,10 +86,10 @@ export async function POST(req: NextRequest) {
         const date = excelDateToISO(row.date);
         if (!grouped[date]) grouped[date] = [];
         grouped[date].push({
-          item_name: row.item_name,
-          quantity: row.quantity || 1,
+          item_name: row.item_name || row.Item || 'Unknown Item',
+          quantity: Number(row.quantity) || 1,
           unit: row.unit || '',
-          amount: row.amount,
+          amount: Number(row.amount) || 0,
           vendor: row.vendor || 'Backfill'
         });
       });
@@ -98,6 +97,7 @@ export async function POST(req: NextRequest) {
       Object.keys(grouped).forEach(date => {
         entries.push({
           date: date,
+          vendor: "Backfill", // default, can be overridden per row
           items: grouped[date]
         });
       });
