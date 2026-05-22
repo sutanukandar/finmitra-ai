@@ -2,22 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dataService } from '../../../lib/db/dataService';
 import * as XLSX from 'xlsx';
 
-// Robust Excel date converter (handles serial dates + real dates)
 function excelDateToISO(value: any): string {
   if (!value) return new Date().toISOString().split('T')[0];
-
   if (typeof value === 'string') {
     if (value.includes('-')) return value.split('T')[0];
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   }
-
   const serial = Number(value);
   if (!isNaN(serial) && serial > 0) {
     const utc_days = Math.floor(serial - 25569);
     const date = new Date(utc_days * 86400 * 1000);
     return date.toISOString().split('T')[0];
   }
-
   return new Date().toISOString().split('T')[0];
 }
 
@@ -25,7 +21,6 @@ export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get('content-type') || '';
 
-    // JSON manual entry
     if (contentType.includes('application/json')) {
       const body = await req.json();
       const { restaurant_id, entries } = body;
@@ -49,48 +44,21 @@ export async function POST(req: NextRequest) {
 
     const entries: any[] = [];
 
-    // 1. Daily Totals sheet (unchanged)
-    const totalsSheet = workbook.Sheets['Daily Totals'] || workbook.Sheets['Sheet1'];
-    if (totalsSheet) {
-      const data = XLSX.utils.sheet_to_json(totalsSheet);
-      data.forEach((row: any) => {
-        const date = excelDateToISO(row.date);
-        entries.push({
-          date,
-          totals: {
-            sales: (Number(row.sales_qr) || 0) + (Number(row.sales_cash) || 0),
-            swiggy: Number(row.swiggy) || 0,
-            zomato: Number(row.zomato) || 0,
-            hyperpure: Number(row.hyperpure) || 0,
-            bigbasket: Number(row.bigbasket) || 0,
-            milk: Number(row.milk) || 0,
-            bread: Number(row.bread) || 0,
-            rent: Number(row.rent) || 0,
-            electricity: Number(row.electricity) || 0,
-            gas: Number(row.gas) || 0,
-            salary: Number(row.salary) || 0,
-            other: Number(row.other) || 0,
-          }
-        });
-      });
-    }
-
-    // 2. Item Level sheet — FIXED + PnL aggregation
+    // Item Level sheet (main fix)
     const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
     if (itemsSheet) {
       const data = XLSX.utils.sheet_to_json(itemsSheet);
-
-      // Group by date for PnL total
       const dateTotals: { [date: string]: number } = {};
 
       data.forEach((row: any) => {
         const date = excelDateToISO(row.date);
         const amount = Number(row.amount) || 0;
 
+        // Track total for PnL
         if (!dateTotals[date]) dateTotals[date] = 0;
         dateTotals[date] += amount;
 
-        // Save individual item (exact match)
+        // Save exact item row
         entries.push({
           date,
           items: [{
@@ -103,11 +71,11 @@ export async function POST(req: NextRequest) {
         });
       });
 
-      // Create PnL entry for each date (aggregated total)
+      // Create PnL entry for every date that has items
       Object.keys(dateTotals).forEach(date => {
         entries.push({
           date,
-          totals: { other: dateTotals[date] }   // ← Total of all items goes here
+          totals: { other: dateTotals[date] }
         });
       });
     }
@@ -130,16 +98,14 @@ async function processEntries(restaurant_id: string, entries: any[]) {
   for (const entry of entries) {
     const { date, totals, items } = entry;
 
-    // Save PnL totals (if present)
     if (totals && Object.keys(totals).length > 0) {
       const { success } = await dataService.upsertPnlEntry(restaurant_id, {
         date: date,
         ...totals
       });
-      results.push({ date, type: "totals", success });
+      results.push({ date, type: "pnl_totals", success });
     }
 
-    // Save item-level rows (exact vendor preserved)
     if (items && Array.isArray(items) && items.length > 0) {
       const vendor = items[0].vendor || 'Backfill';
       await dataService.saveInvoiceItems(restaurant_id, vendor, date, items);
