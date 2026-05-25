@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 
-export async function GET(req: NextRequest, { params }: { params: { type: string } }) {
-  const { type } = params;
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ type: string }> }
+) {
+  const { type } = await params;   // ← This is the fix
 
   if (type === 'pnl') {
     const wb = XLSX.utils.book_new();
