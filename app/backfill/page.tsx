@@ -6,7 +6,7 @@ export default function BackfillPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d'); // Your test restaurant ID
+  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d');
 
   // Manual entry states
   const [date, setDate] = useState('');
@@ -27,9 +27,6 @@ export default function BackfillPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
-    if (file) {
-      console.log('✅ File selected:', file.name);
-    }
   };
 
   const handleFileUpload = async () => {
@@ -62,13 +59,24 @@ export default function BackfillPage() {
     }
   };
 
-  const downloadTemplate = (type: 'pnl' | 'invoice') => {
-    const link = document.createElement('a');
-    link.href = type === 'pnl' 
-      ? '/templates/finmitra-pnl-template.xlsx' 
-      : '/templates/finmitra-invoice-template.xlsx';
-    link.download = type === 'pnl' ? 'finmitra-pnl-template.xlsx' : 'finmitra-invoice-template.xlsx';
-    link.click();
+  const downloadTemplate = async (type: 'pnl' | 'invoice') => {
+    try {
+      const res = await fetch(`/api/templates/${type}`);
+      if (!res.ok) throw new Error('Download failed');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = type === 'pnl' 
+        ? 'finmitra-pnl-template.xlsx' 
+        : 'finmitra-invoice-template.xlsx';
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Download failed. Please try again.');
+      console.error(err);
+    }
   };
 
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -106,7 +114,6 @@ export default function BackfillPage() {
       const data = await res.json();
       if (data.success) {
         setMessage('✅ Manual entry saved successfully!');
-        // Clear form
         setDate(''); setSalesQr(''); setSalesCash(''); setSwiggy(''); setZomato('');
         setHyperpure(''); setBigbasket(''); setMilk(''); setBread(''); setRent('');
         setElectricity(''); setGas(''); setSalary(''); setOther('');
@@ -132,7 +139,8 @@ export default function BackfillPage() {
             <label className="block text-sm font-medium mb-1">Date</label>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-3 border rounded-lg" required />
           </div>
-          {/* Revenue Section */}
+
+          {/* Revenue */}
           <div className="col-span-2">
             <h3 className="font-medium mb-3 text-green-700">Revenue / Sales</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -146,6 +154,7 @@ export default function BackfillPage() {
               </div>
             </div>
           </div>
+
           {/* Expenses */}
           <div className="col-span-2">
             <h3 className="font-medium mb-3 text-red-700">Expenses</h3>
