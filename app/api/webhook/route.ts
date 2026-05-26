@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     from = (formData.get('From') as string)?.replace('whatsapp:', '') || '';
     const body = (formData.get('Body') as string || '').trim().toLowerCase();
     const mediaUrl = formData.get('MediaUrl0') as string | null;
+    const mediaType = formData.get('MediaContentType0') as string | null;
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Media Upload
     if (mediaUrl) {
-      await handleMediaUpload(from, restaurant.id, mediaUrl);
+      await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
