@@ -19,41 +19,55 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
         console.log(`[ConfirmationHandler] Detected vendor: "${parseResult.vendor}"`);
 
-        // Robust Vendor Mapping
-        const totals: any = {};
+        const today = new Date().toISOString().split('T')[0];
+        const entryDate = parseResult.date || today;
 
-        if (vendorName.includes('hyperpure') || vendorName.includes('zomato')) {
-          totals.hyperpure = parseResult.total || 0;
-        } 
-        else if (
-          vendorName.includes('bigbasket') || 
-          vendorName.includes('big basket') || 
-          vendorName.includes('bbnow') || 
-          vendorName.includes('bb now') ||
-          vendorName.includes('innovative retail')
-        ) {
-          totals.bigbasket = parseResult.total || 0;
-        } 
-        else {
-          // ALL unknown vendors go to the new 'other' column
-          totals.other = parseResult.total || 0;
-        }
+        // Determine pnl_field (needed for upload_records and totals)
+        const pnlField =
+          vendorName.includes('hyperpure') || vendorName.includes('zomato')
+            ? 'hyperpure'
+            : vendorName.includes('bigbasket') || vendorName.includes('big basket') ||
+              vendorName.includes('bbnow') || vendorName.includes('bb now') ||
+              vendorName.includes('innovative retail')
+            ? 'bigbasket'
+            : 'other';
 
-        // Save item-level data (always)
+        const deliveryFee = parseResult.delivery_fee || 0;
+        const foodTotal   = (parseResult.total || 0) - deliveryFee;
+
+        // Write audit row to upload_records and get its id
+        const uploadRecordId = await dataService.createUploadRecord(restaurantId, {
+          date:      entryDate,
+          doc_type:  'invoice',
+          source:    'whatsapp',
+          amount:    parseResult.total || 0,
+          pnl_field: pnlField,
+          file_url:  parseResult.mediaUrl,
+          metadata:  { vendor: parseResult.vendor, delivery_fee: deliveryFee }
+        });
+
+        // Save item-level data with upload_record_id FK
         await dataService.saveInvoiceItems(
           restaurantId,
           parseResult.vendor || "Unknown Vendor",
-          parseResult.date || new Date().toISOString().split('T')[0],
-          parseResult.items || []
+          entryDate,
+          parseResult.items || [],
+          uploadRecordId
         );
 
-        // Save aggregated total with correct column
-        await dataService.upsertPnlEntry(restaurantId, {
-          date: parseResult.date || new Date().toISOString().split('T')[0],
-          ...totals
-        });
+        // Build pnl totals: food total → vendor column, delivery fee → other
+        const totals: any = {};
+        if (pnlField === 'hyperpure')  totals.hyperpure  = foodTotal;
+        else if (pnlField === 'bigbasket') totals.bigbasket = foodTotal;
+        else                           totals.other      = foodTotal;
 
-        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} (₹${parseResult.total || 0}) added to P&L and invoice_items.`);
+        if (deliveryFee > 0) {
+          totals.other = (totals.other || 0) + deliveryFee;
+        }
+
+        await dataService.upsertPnlEntry(restaurantId, { date: entryDate, ...totals });
+
+        await sendMessage(from, `✅ Bill saved successfully!\n\n${parseResult.vendor || 'Bill'} (₹${foodTotal}${deliveryFee > 0 ? ` + ₹${deliveryFee} delivery` : ''}) added to P&L and invoice_items.`);
       } else {
         await sendMessage(from, "✅ Bill saved successfully!\n\nYour bill has been added to today's P&L.");
       }

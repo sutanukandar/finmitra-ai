@@ -148,20 +148,30 @@ Rules:
       console.log(`[Parser] Date converted: ${parsed.date} → ${isoDate}`);
 
       // Enrich each item with mapped_category and ensure 'name' field for compatibility
-      const items = (parsed.items || []).map((item: any) => ({
+      const allItems = (parsed.items || []).map((item: any) => ({
         ...item,
         name: item.item_name || item.name || 'Unknown Item',
         mapped_category: 'cogs'
       }));
 
-      console.log(`[Parser] Done. Vendor: ${parsed.vendor}, Total: ${parsed.total}, Items: ${items.length}`);
+      // Separate delivery/shipping charges from food items
+      const DELIVERY_RE = /delivery|shipping|freight|pay on delivery/i;
+      const foodItems     = allItems.filter((i: any) => !DELIVERY_RE.test(i.item_name || ''));
+      const deliveryItems = allItems.filter((i: any) =>  DELIVERY_RE.test(i.item_name || ''));
+      const deliveryFee   = deliveryItems.reduce((sum: number, i: any) => sum + (i.amount || 0), 0);
+
+      if (deliveryFee > 0) {
+        console.log(`[Parser] Separated delivery fee: ₹${deliveryFee} (${deliveryItems.length} line item(s))`);
+      }
+      console.log(`[Parser] Done. Vendor: ${parsed.vendor}, Total: ${parsed.total}, Food items: ${foodItems.length}`);
 
       return {
         success: true,
         vendor: parsed.vendor,
         date: isoDate,
         total: parsed.total,
-        items,
+        items: foodItems,
+        delivery_fee: deliveryFee,
         extracted: responseText
       };
 

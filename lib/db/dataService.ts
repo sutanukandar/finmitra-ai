@@ -92,11 +92,38 @@ export const dataService = {
     if (error) console.error(error);
   },
 
+  async createUploadRecord(
+    restaurantId: string,
+    data: {
+      date: string;
+      doc_type: string;
+      source: string;
+      amount: number;
+      pnl_field: string;
+      file_url?: string;
+      metadata?: object;
+    }
+  ): Promise<string> {
+    const { data: record, error } = await supabase
+      .from('upload_records')
+      .insert({ restaurant_id: restaurantId, ...data })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error("[dataService] createUploadRecord failed:", error);
+      throw error;
+    }
+    console.log(`[dataService] upload_records row created: ${record.id}`);
+    return record.id;
+  },
+
   async saveInvoiceItems(
     restaurantId: string,
     vendor: string,
     date: string,
-    items: any[]
+    items: any[],
+    uploadRecordId?: string
   ) {
     const insertData = items.map(item => ({
       restaurant_id: restaurantId,
@@ -108,6 +135,7 @@ export const dataService = {
       rate: item.rate || 0,
       amount: item.amount || 0,
       mapped_category: item.mapped_category || 'fixed',
+      upload_record_id: uploadRecordId || null,
       metadata: { invoice_number: item.invoice_number || '' }
     }));
 

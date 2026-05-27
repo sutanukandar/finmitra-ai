@@ -31,7 +31,9 @@ export interface MediaParseResult {
   date?: string;
   total?: number;
   items?: Array<{ name: string; amount: number }>;
-  extracted?: string; // raw text from Claude
+  delivery_fee?: number;
+  mediaUrl?: string;
+  extracted?: string;
 }
 
 export interface PendingConfirmationPayload {

@@ -29,8 +29,8 @@ Reply *haan* to save this bill or *nahi* to cancel.`;
 
       await sendMessage(from, shortPreview);
 
-      // Save FULL detailed result for later use
-      await dataService.createPendingConfirmation(restaurantId, parseResult);
+      // Save FULL detailed result + mediaUrl for upload_records FK later
+      await dataService.createPendingConfirmation(restaurantId, { ...parseResult, mediaUrl });
 
     } else {
       await sendMessage(from, "Sorry, I couldn't read this bill clearly.\nPlease type manually like: `hyperpure 2845`");
