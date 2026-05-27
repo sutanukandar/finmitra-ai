@@ -179,6 +179,42 @@ export const dataService = {
     };
   },
 
+  async checkDuplicatePending(
+    restaurantId: string,
+    vendor: string,
+    date: string,
+    amount: number
+  ): Promise<{ isDuplicate: boolean }> {
+    const { data } = await supabase
+      .from('pending_confirmations')
+      .select('payload')
+      .eq('restaurant_id', restaurantId)
+      .in('action', ['confirm_bill', 'duplicate_bill_check'])
+      .gt('expires_at', new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+
+    if (!data?.payload) return { isDuplicate: false };
+
+    const p = data.payload;
+    const sameVendorField = (() => {
+      const normalize = (v: string) => {
+        const lv = v.toLowerCase();
+        if (lv.includes('hyperpure') || lv.includes('zomato')) return 'hyperpure';
+        if (lv.includes('bigbasket') || lv.includes('big basket') || lv.includes('bbnow') || lv.includes('innovative retail')) return 'bigbasket';
+        return 'other';
+      };
+      return normalize(vendor) === normalize(p.vendor || '');
+    })();
+
+    const sameDate   = p.date === date;
+    const low        = amount * 0.95;
+    const high       = amount * 1.05;
+    const sameAmount = (p.total || 0) >= low && (p.total || 0) <= high;
+
+    return { isDuplicate: sameVendorField && sameDate && sameAmount };
+  },
+
   async checkDuplicateBill(
     restaurantId: string,
     vendor: string,
@@ -251,18 +287,16 @@ export const dataService = {
       pnl_field?: string;
       amount_reversed?: number;
       performed_by?: string;
-      notes?: string;
     }
   ) {
     const { error } = await supabase.from('audit_log').insert({
-      restaurant_id: restaurantId,
-      action: data.action,
-      date_affected: data.date_affected,
-      pnl_field: data.pnl_field,
+      restaurant_id:   restaurantId,
+      action:          data.action,
+      date_affected:   data.date_affected,
+      pnl_field:       data.pnl_field,
       amount_reversed: data.amount_reversed,
-      performed_by: data.performed_by || 'owner',
-      performed_at: new Date().toISOString(),
-      notes: data.notes
+      performed_by:    data.performed_by || 'owner',
+      performed_at:    new Date().toISOString()
     });
     if (error) console.error("[dataService] writeAuditLog failed:", error);
   }

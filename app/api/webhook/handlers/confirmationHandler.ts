@@ -31,7 +31,6 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           date_affected: date,
           pnl_field:    category,
           amount_reversed: amount,
-          notes:        `Owner confirmed duplicate text entry: ${category} ₹${amount}`
         });
 
         await sendMessage(from, `✅ Added! ${category} for ${formatDate(date)} is now ₹${newTotal}.`);
@@ -87,7 +86,6 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
               date_affected: entryDate,
               pnl_field:    pnlField,
               amount_reversed: parseResult.total || 0,
-              notes:        `Owner confirmed duplicate bill: ${parseResult.vendor} ₹${parseResult.total}`
             });
           }
 
