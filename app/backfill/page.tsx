@@ -67,7 +67,7 @@ export default function BackfillPage() {
   const [pageState, setPageState] = useState<PageState>('idle');
   const [rows, setRows]           = useState<BillRow[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0, currentFile: '' });
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0, currentFile: '', waiting: false });
   const [saveProgress,  setSaveProgress]  = useState({ current: 0, total: 0 });
   const [doneSummary, setDoneSummary] = useState<{
     billsSaved: number; itemsSaved: number; totalAmount: number;
@@ -99,7 +99,7 @@ export default function BackfillPage() {
     if (rows.length === 0) return;
     const snapshot = [...rows];
     setPageState('parsing');
-    setParseProgress({ current: 0, total: snapshot.length, currentFile: '' });
+    setParseProgress({ current: 0, total: snapshot.length, currentFile: '', waiting: false });
 
     let completed = 0;
 
@@ -107,7 +107,7 @@ export default function BackfillPage() {
       setRows(prev => prev.map(r =>
         r.id === row.id ? { ...r, status: 'parsing' } : r
       ));
-      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name });
+      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name, waiting: false });
 
       const fd = new FormData();
       fd.append('file', row.file);
@@ -115,8 +115,22 @@ export default function BackfillPage() {
       fd.append('month', month);
 
       try {
-        const res  = await fetch('/api/backfill', { method: 'POST', body: fd });
-        const data = await res.json();
+        let data: any;
+        let retries = 0;
+        while (retries <= 1) {
+          const res = await fetch('/api/backfill', { method: 'POST', body: fd });
+          data = await res.json();
+
+          if (!data.success && data.error && data.error.includes('rate_limit') && retries === 0) {
+            setRows(prev => prev.map(r =>
+              r.id === row.id ? { ...r, error: 'Rate limited, retrying in 15s…' } : r
+            ));
+            await new Promise(resolve => setTimeout(resolve, 15000));
+            retries++;
+            continue;
+          }
+          break;
+        }
 
         setRows(prev => prev.map(r => {
           if (r.id !== row.id) return r;
@@ -133,11 +147,13 @@ export default function BackfillPage() {
       }
 
       completed++;
-      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name });
+      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name, waiting: false });
 
-      // 2-second delay between files to avoid Claude rate limits
+      // 5-second delay between files to avoid Claude rate limits (~12 bills/min max)
       if (completed < snapshot.length) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        setParseProgress(p => ({ ...p, waiting: true, currentFile: 'Waiting…' }));
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        setParseProgress(p => ({ ...p, waiting: false }));
       }
     }
 
@@ -312,7 +328,10 @@ export default function BackfillPage() {
               <div className="space-y-5">
                 <div className="bg-white rounded-xl border p-6 space-y-3">
                   <p className="text-sm font-medium text-gray-600">
-                    Parsing {parseProgress.currentFile || '…'} ({parseProgress.current} of {parseProgress.total})
+                    {parseProgress.waiting
+                      ? `Waiting 5s to avoid rate limits… (${parseProgress.current} of ${parseProgress.total} done)`
+                      : `Parsing ${parseProgress.currentFile || '…'} (${parseProgress.current + 1} of ${parseProgress.total})`
+                    }
                   </p>
                   <div className="w-full bg-gray-100 rounded-full h-2.5">
                     <div
