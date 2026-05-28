@@ -19,24 +19,24 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
         return true;
       }
 
-      // ── duplicate_text_check: owner confirmed adding on top ──────────────
-      if (action === 'duplicate_text_check') {
+      // ── confirm_text_entry: duplicate text entry — accumulate on top ─────
+      if (action === 'confirm_text_entry') {
         const { category, date, amount } = pending.payload || {};
-        console.log(`[ConfirmationHandler] Duplicate text override: ${category} ₹${amount} for ${date}`);
+        console.log(`[ConfirmationHandler] Text duplicate override: ${category} ₹${amount} for ${date}`);
 
         const { newTotal } = await dataService.accumulatePnlEntry(restaurantId, category, date, amount);
 
         await dataService.writeAuditLog(restaurantId, {
-          action:       'duplicate_override',
-          date_affected: date,
-          pnl_field:    category,
+          action:          'duplicate_override',
+          date_affected:   date,
+          pnl_field:       category,
           amount_reversed: amount,
         });
 
-        await sendMessage(from, `✅ Added! ${category} for ${formatDate(date)} is now ₹${newTotal}.`);
+        await sendMessage(from, `✅ Saved. ${category} for ${formatDate(date)} is now ₹${newTotal}.`);
 
-      // ── confirm_bill / duplicate_bill_check: save the bill ───────────────
-      } else if (action === 'confirm_bill' || action === 'duplicate_bill_check') {
+      // ── confirm_bill: clean or duplicate bill — same save flow ───────────
+      } else if (action === 'confirm_bill') {
         const parseResult = pending.payload;
 
         if (parseResult?.success) {
@@ -73,27 +73,31 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           );
 
           const totals: any = {};
-          if (pnlField === 'hyperpure')      totals.hyperpure  = foodTotal;
-          else if (pnlField === 'bigbasket') totals.bigbasket  = foodTotal;
-          else                               totals.other      = foodTotal;
+          if (pnlField === 'hyperpure')      totals.hyperpure = foodTotal;
+          else if (pnlField === 'bigbasket') totals.bigbasket = foodTotal;
+          else                               totals.other     = foodTotal;
           if (deliveryFee > 0) totals.other = (totals.other || 0) + deliveryFee;
 
           await dataService.upsertPnlEntry(restaurantId, { date: entryDate, ...totals });
 
-          if (action === 'duplicate_bill_check') {
+          if (parseResult.is_duplicate) {
             await dataService.writeAuditLog(restaurantId, {
-              action:       'duplicate_override',
-              date_affected: entryDate,
-              pnl_field:    pnlField,
+              action:          'duplicate_override',
+              date_affected:   entryDate,
+              pnl_field:       pnlField,
               amount_reversed: parseResult.total || 0,
             });
           }
 
+          const itemCount = parseResult.items?.length || 0;
           await sendMessage(from,
-            `✅ Bill saved!\n\n${parseResult.vendor || 'Bill'} (₹${foodTotal}${deliveryFee > 0 ? ` + ₹${deliveryFee} delivery` : ''}) added to P&L.`
+`✅ Bill saved!
+
+${parseResult.vendor || 'Bill'} ₹${foodTotal}${deliveryFee > 0 ? ` + ₹${deliveryFee} delivery` : ''} added to ${formatDate(entryDate)} P&L
+${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
           );
         } else {
-          await sendMessage(from, "✅ Saved!\n\nYour entry has been added to P&L.");
+          await sendMessage(from, "✅ Saved! Your entry has been added to P&L.");
         }
 
       } else {
@@ -102,12 +106,10 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
     } else {
       // ── nahi / cancel ────────────────────────────────────────────────────
-      if (action === 'duplicate_text_check') {
+      if (action === 'confirm_text_entry') {
         await sendMessage(from, "Cancelled. Nothing was saved.");
-      } else if (action === 'duplicate_bill_check') {
-        await sendMessage(from, "Cancelled. Bill was not saved.");
       } else {
-        await sendMessage(from, "❌ Cancelled. No data was saved.");
+        await sendMessage(from, "Cancelled. Bill was not saved.");
       }
     }
 

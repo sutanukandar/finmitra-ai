@@ -184,12 +184,12 @@ export const dataService = {
     vendor: string,
     date: string,
     amount: number
-  ): Promise<{ isDuplicate: boolean }> {
+  ): Promise<{ isDuplicate: boolean; existingAmount?: number; existingCreatedAt?: string }> {
     const { data } = await supabase
       .from('pending_confirmations')
-      .select('payload')
+      .select('payload, created_at')
       .eq('restaurant_id', restaurantId)
-      .in('action', ['confirm_bill', 'duplicate_bill_check'])
+      .eq('action', 'confirm_bill')
       .gt('expires_at', new Date().toISOString())
       .limit(1)
       .maybeSingle();
@@ -197,22 +197,23 @@ export const dataService = {
     if (!data?.payload) return { isDuplicate: false };
 
     const p = data.payload;
-    const sameVendorField = (() => {
-      const normalize = (v: string) => {
-        const lv = v.toLowerCase();
-        if (lv.includes('hyperpure') || lv.includes('zomato')) return 'hyperpure';
-        if (lv.includes('bigbasket') || lv.includes('big basket') || lv.includes('bbnow') || lv.includes('innovative retail')) return 'bigbasket';
-        return 'other';
-      };
-      return normalize(vendor) === normalize(p.vendor || '');
-    })();
+    const normalize = (v: string) => {
+      const lv = (v || '').toLowerCase();
+      if (lv.includes('hyperpure') || lv.includes('zomato')) return 'hyperpure';
+      if (lv.includes('bigbasket') || lv.includes('big basket') || lv.includes('bbnow') || lv.includes('innovative retail')) return 'bigbasket';
+      return 'other';
+    };
 
+    const sameVendor = normalize(vendor) === normalize(p.vendor || '');
     const sameDate   = p.date === date;
     const low        = amount * 0.95;
     const high       = amount * 1.05;
     const sameAmount = (p.total || 0) >= low && (p.total || 0) <= high;
 
-    return { isDuplicate: sameVendorField && sameDate && sameAmount };
+    if (sameVendor && sameDate && sameAmount) {
+      return { isDuplicate: true, existingAmount: p.total, existingCreatedAt: data.created_at };
+    }
+    return { isDuplicate: false };
   },
 
   async checkDuplicateBill(
@@ -221,14 +222,11 @@ export const dataService = {
     date: string,
     amount: number
   ): Promise<{ isDuplicate: boolean; existingRecord?: { id: string; amount: number; created_at: string } }> {
-    const v = vendor.toLowerCase();
+    const v = (vendor || '').toLowerCase();
     const pnlField =
       v.includes('hyperpure') || v.includes('zomato') ? 'hyperpure'
       : v.includes('bigbasket') || v.includes('big basket') || v.includes('bbnow') || v.includes('innovative retail') ? 'bigbasket'
       : 'other';
-
-    const low  = amount * 0.95;
-    const high = amount * 1.05;
 
     const { data } = await supabase
       .from('upload_records')
@@ -236,16 +234,20 @@ export const dataService = {
       .eq('restaurant_id', restaurantId)
       .eq('date', date)
       .eq('pnl_field', pnlField)
-      .gte('amount', low)
-      .lte('amount', high)
       .is('deleted_at', null)
-      .limit(1)
-      .maybeSingle();
+      .order('created_at', { ascending: false })
+      .limit(5);
 
-    return {
-      isDuplicate: !!data,
-      existingRecord: data || undefined
-    };
+    if (!data || data.length === 0) return { isDuplicate: false };
+
+    const low   = amount * 0.95;
+    const high  = amount * 1.05;
+    const match = data.find(row => {
+      const n = Number(row.amount);
+      return n >= low && n <= high;
+    });
+
+    return { isDuplicate: !!match, existingRecord: match || undefined };
   },
 
   async accumulatePnlEntry(

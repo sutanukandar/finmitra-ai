@@ -45,26 +45,25 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         if (dupCheck.isDuplicate) {
           console.log(`[TextHandler] Duplicate detected: ${pnlColumn} ₹${entry.amount} on ${finalDate}`);
 
-          await dataService.createPendingConfirmation(
-            restaurantId,
-            { category: pnlColumn, date: finalDate, amount: entry.amount || 0, type: 'text', pnlEntry },
-            'duplicate_text_check'
-          );
-
-          const dateLabel = formatDate(finalDate);
-          const timeLabel = formatTime(dupCheck.enteredAt);
           const existing  = dupCheck.existingAmount || 0;
           const newAmount = entry.amount || 0;
+          const dateLabel = formatDate(finalDate);
+
+          await dataService.createPendingConfirmation(
+            restaurantId,
+            { category: pnlColumn, date: finalDate, amount: newAmount, existingAmount: existing, type: 'text' },
+            'confirm_text_entry'
+          );
 
           await sendMessage(from,
-`⚠️ Duplicate entry detected!
+`⚠️ Possible Duplicate Entry
 
-${pnlColumn} ₹${newAmount} was already added for ${dateLabel}
-Entered at: ${timeLabel}
+${pnlColumn} ₹${newAmount} for ${dateLabel}
 
-Do you still want to add this?
-Reply *haan* → add ₹${newAmount} again (total will be ₹${existing + newAmount})
-Reply *nahi* → cancel`
+You already have ${pnlColumn} ₹${existing} saved for this date.
+Saving again will add ₹${newAmount} more (total = ₹${existing + newAmount})
+
+Reply *haan* to save anyway · *nahi* to cancel`
           );
 
           // Stop processing further entries in this message
@@ -73,11 +72,14 @@ Reply *nahi* → cancel`
 
         await dataService.upsertPnlEntry(restaurantId, pnlEntry);
         console.log(`[TextHandler] Saved ${pnlColumn} = ₹${entry.amount} for date ${finalDate}`);
+        await sendMessage(from, `✅ ${pnlColumn} ₹${entry.amount || 0} saved for ${formatDate(finalDate)}`);
         savedCount++;
       }
 
-      if (savedCount > 0 && savedCount === parsed.entries.length) {
-        await sendMessage(from, `✅ Saved ${savedCount} ${savedCount === 1 ? 'entry' : 'entries'} successfully!`);
+      // Multi-entry success (savedCount > 1 — individual saves already messaged above
+      // only for single-entry messages; send a summary if all entries saved cleanly)
+      if (savedCount > 1) {
+        await sendMessage(from, `✅ ${savedCount} entries saved successfully!`);
       }
     } 
     else if (parsed.intent === "query_today" || parsed.intent === "query_mtd" || parsed.intent === "query_lastmonth") {
@@ -99,13 +101,6 @@ Reply *nahi* → cancel`
 function formatDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
-  });
-}
-
-function formatTime(isoTs?: string): string {
-  if (!isoTs) return 'unknown time';
-  return new Date(isoTs).toLocaleTimeString('en-IN', {
-    hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
   });
 }
 

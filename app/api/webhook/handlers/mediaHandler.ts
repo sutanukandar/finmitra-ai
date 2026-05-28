@@ -20,63 +20,67 @@ export async function handleMediaUpload(
       const vendor    = parseResult.vendor || '';
       const billDate  = parseResult.date || new Date().toISOString().split('T')[0];
       const billTotal = parseResult.total || 0;
+      const itemCount = parseResult.items?.length || 0;
 
-      // ── STEP 1: check pending_confirmations (bill sent twice before confirming) ──
+      // ── STEP 1: bill sent twice before confirming (check pending_confirmations) ──
       const pendingDup = await dataService.checkDuplicatePending(
         restaurantId, vendor, billDate, billTotal
       );
 
-      if (pendingDup.isDuplicate) {
+      // ── STEP 2: bill already confirmed and saved (check upload_records) ──
+      const savedDup = pendingDup.isDuplicate
+        ? { isDuplicate: false }
+        : await dataService.checkDuplicateBill(restaurantId, vendor, billDate, billTotal);
+
+      const isDuplicate = pendingDup.isDuplicate || savedDup.isDuplicate;
+
+      // Resolve existing-bill info for duplicate message
+      const existingAmount = pendingDup.isDuplicate
+        ? pendingDup.existingAmount
+        : savedDup.existingRecord ? Number(savedDup.existingRecord.amount) : undefined;
+      const existingUploadedAt = pendingDup.isDuplicate
+        ? pendingDup.existingCreatedAt
+        : savedDup.existingRecord?.created_at;
+
+      // ── STEP 3: send ONE combined message (preview + save prompt) ──
+      if (isDuplicate && existingAmount !== undefined) {
+        const uploadedOn = existingUploadedAt ? formatDateTime(existingUploadedAt) : 'earlier';
+
         await sendMessage(from,
-`⚠️ You already sent this bill a moment ago and haven't confirmed yet.
+`⚠️ Possible Duplicate Bill
 
-${vendor} ₹${billTotal} for ${formatDate(billDate)}
+Vendor : ${vendor}
+Date   : ${formatDate(billDate)}
+Total  : ₹${billTotal}
+Items  : ${itemCount} items extracted
 
-Reply *haan* → save it
-Reply *nahi* → cancel`
+You already have a ${vendor} bill of ₹${existingAmount}
+saved on ${formatDate(billDate)} (uploaded ${uploadedOn})
+
+Reply *haan* to save anyway · *nahi* to cancel`
         );
-        // Overwrite the stale pending with a fresh duplicate_bill_check
+
+        // Overwrite any stale pending, save with is_duplicate flag
         await dataService.deletePendingConfirmation(restaurantId);
-        await dataService.createPendingConfirmation(restaurantId, payload, 'duplicate_bill_check');
+        await dataService.createPendingConfirmation(
+          restaurantId, { ...payload, is_duplicate: true }, 'confirm_bill'
+        );
 
       } else {
-        // ── STEP 2: check upload_records (bill already confirmed and saved) ──
-        const savedDup = await dataService.checkDuplicateBill(
-          restaurantId, vendor, billDate, billTotal
+        await sendMessage(from,
+`✅ Bill Parsed Successfully!
+
+Vendor : ${vendor}
+Date   : ${formatDate(billDate)}
+Total  : ₹${billTotal}${parseResult.delivery_fee ? ` (incl. ₹${parseResult.delivery_fee} delivery)` : ''}
+Items  : ${itemCount} items extracted
+
+Reply *haan* to save · *nahi* to cancel`
         );
 
-        if (savedDup.isDuplicate && savedDup.existingRecord) {
-          const ex         = savedDup.existingRecord;
-          const uploadedOn = formatDateTime(ex.created_at);
-
-          await sendMessage(from,
-`⚠️ Duplicate bill detected!
-
-A ${vendor} bill of ₹${ex.amount} for ${formatDate(billDate)}
-was already uploaded on ${uploadedOn}
-
-Do you still want to upload this?
-Reply *haan* → upload anyway
-Reply *nahi* → cancel`
-          );
-
-          await dataService.createPendingConfirmation(restaurantId, payload, 'duplicate_bill_check');
-
-        } else {
-          // ── STEP 3: clean bill — normal preview ──
-          const shortPreview = `✅ Bill Parsed Successfully!
-
-Vendor: ${vendor || 'Hyperpure'}
-Date: ${billDate}
-Total: ₹${billTotal}${parseResult.delivery_fee ? ` (incl. ₹${parseResult.delivery_fee} delivery)` : ''}
-
-${parseResult.items?.length || 0} items extracted.
-
-Reply *haan* to save this bill or *nahi* to cancel.`;
-
-          await sendMessage(from, shortPreview);
-          await dataService.createPendingConfirmation(restaurantId, payload, 'confirm_bill');
-        }
+        await dataService.createPendingConfirmation(
+          restaurantId, { ...payload, is_duplicate: false }, 'confirm_bill'
+        );
       }
 
     } else {
@@ -92,7 +96,7 @@ Reply *haan* to save this bill or *nahi* to cancel.`;
 function formatDate(isoDate: string): string {
   if (!isoDate) return 'that date';
   return new Date(isoDate).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
   });
 }
 
