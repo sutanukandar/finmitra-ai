@@ -70,8 +70,8 @@ Reply *haan* to save anyway · *nahi* to cancel`
           break;
         }
 
-        await dataService.upsertPnlEntry(restaurantId, pnlEntry);
-        console.log(`[TextHandler] Saved ${pnlColumn} = ₹${entry.amount} for date ${finalDate}`);
+        await dataService.accumulatePnlEntry(restaurantId, pnlColumn, finalDate, entry.amount || 0);
+        console.log(`[TextHandler] Accumulated ${pnlColumn} += ₹${entry.amount} for date ${finalDate}`);
         await sendMessage(from, `✅ ${pnlColumn} ₹${entry.amount || 0} saved for ${formatDate(finalDate)}`);
         savedCount++;
       }
