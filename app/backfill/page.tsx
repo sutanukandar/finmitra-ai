@@ -1,230 +1,564 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState, useRef, useCallback } from 'react';
+
+// TODO: Replace with auth session once auth is built
+const RESTAURANT_ID = 'b77ed758-9a72-4de2-9138-b353589c656d';
+
+type Tab       = 'bills' | 'expenses' | 'sales';
+type PageState = 'idle' | 'parsing' | 'review' | 'saving' | 'done';
+type RowStatus = 'pending' | 'parsing' | 'success' | 'duplicate' | 'error';
+
+interface ParsedItem {
+  item_name: string;
+  item_canonical?: string;
+  quantity_normalised?: number;
+  unit_normalised?: string;
+  quantity?: number;
+  unit?: string;
+  rate?: number;
+  amount: number;
+}
+
+interface ParsedBill {
+  vendor: string;
+  date: string;
+  total: number;
+  items: ParsedItem[];
+  delivery_fee: number;
+  is_duplicate: boolean;
+  existing_record: { amount: number; created_at: string } | null;
+}
+
+interface BillRow {
+  id: string;
+  file: File;
+  status: RowStatus;
+  parsed?: ParsedBill;
+  error?: string;
+  include: boolean;
+  expanded: boolean;
+}
+
+function formatBytes(n: number) {
+  return n < 1024 * 1024
+    ? `${(n / 1024).toFixed(0)} KB`
+    : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string) {
+  if (!iso) return '—';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+  });
+}
+
+function StatusIcon({ status }: { status: RowStatus }) {
+  if (status === 'success')   return <span className="text-green-500 text-lg">✅</span>;
+  if (status === 'duplicate') return <span className="text-yellow-500 text-lg">⚠️</span>;
+  if (status === 'error')     return <span className="text-red-500 text-lg">❌</span>;
+  if (status === 'parsing')   return <span className="inline-block animate-spin text-blue-400 text-lg">⏳</span>;
+  return <span className="text-gray-300 text-lg">○</span>;
+}
 
 export default function BackfillPage() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [restaurantId] = useState('b77ed758-9a72-4de2-9138-b353589c656d');
+  const [tab, setTab]             = useState<Tab>('bills');
+  const [month, setMonth]         = useState(() => new Date().toISOString().slice(0, 7));
+  const [pageState, setPageState] = useState<PageState>('idle');
+  const [rows, setRows]           = useState<BillRow[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
+  const [saveProgress,  setSaveProgress]  = useState({ current: 0, total: 0 });
+  const [doneSummary, setDoneSummary] = useState<{
+    billsSaved: number; itemsSaved: number; totalAmount: number;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Manual entry states
-  const [date, setDate] = useState('');
-  const [salesQr, setSalesQr] = useState('');
-  const [salesCash, setSalesCash] = useState('');
-  const [swiggy, setSwiggy] = useState('');
-  const [zomato, setZomato] = useState('');
-  const [hyperpure, setHyperpure] = useState('');
-  const [bigbasket, setBigbasket] = useState('');
-  const [milk, setMilk] = useState('');
-  const [bread, setBread] = useState('');
-  const [rent, setRent] = useState('');
-  const [electricity, setElectricity] = useState('');
-  const [gas, setGas] = useState('');
-  const [salary, setSalary] = useState('');
-  const [other, setOther] = useState('');
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const newRows: BillRow[] = Array.from(files).map(file => ({
+      id:       Math.random().toString(36).slice(2),
+      file,
+      status:   'pending',
+      include:  true,
+      expanded: false,
+    }));
+    setRows(prev => [...prev, ...newRows]);
+  }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setSelectedFile(file);
-  };
+  const removeRow     = (id: string) => setRows(prev => prev.filter(r => r.id !== id));
+  const toggleInclude = (id: string) => setRows(prev => prev.map(r => r.id === id ? { ...r, include: !r.include } : r));
+  const toggleExpand  = (id: string) => setRows(prev => prev.map(r => r.id === id ? { ...r, expanded: !r.expanded } : r));
 
-  const handleFileUpload = async () => {
-    if (!selectedFile) return;
-
-    setLoading(true);
-    setMessage('');
-
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('restaurant_id', restaurantId);
-
-    try {
-      const res = await fetch('/api/backfill', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setMessage(`✅ Success! ${data.results?.length || 0} entries processed.`);
-        setSelectedFile(null);
-      } else {
-        setMessage(`❌ Error: ${data.error}`);
-      }
-    } catch (err: any) {
-      setMessage(`❌ Upload failed: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadTemplate = async (type: 'pnl' | 'invoice') => {
-    try {
-      const res = await fetch(`/api/templates/${type}`);
-      if (!res.ok) throw new Error('Download failed');
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = type === 'pnl' 
-        ? 'finmitra-pnl-template.xlsx' 
-        : 'finmitra-invoice-template.xlsx';
-      link.click();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      alert('Download failed. Please try again.');
-      console.error(err);
-    }
-  };
-
-  const handleManualSubmit = async (e: React.FormEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setMessage('');
-
-    const payload = {
-      restaurant_id: restaurantId,
-      entries: [{
-        date,
-        totals: {
-          sales: Number(salesQr || 0) + Number(salesCash || 0),
-          swiggy: Number(swiggy || 0),
-          zomato: Number(zomato || 0),
-          hyperpure: Number(hyperpure || 0),
-          bigbasket: Number(bigbasket || 0),
-          milk: Number(milk || 0),
-          bread: Number(bread || 0),
-          rent: Number(rent || 0),
-          electricity: Number(electricity || 0),
-          gas: Number(gas || 0),
-          salary: Number(salary || 0),
-          other: Number(other || 0),
-        }
-      }]
-    };
-
-    try {
-      const res = await fetch('/api/backfill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setMessage('✅ Manual entry saved successfully!');
-        setDate(''); setSalesQr(''); setSalesCash(''); setSwiggy(''); setZomato('');
-        setHyperpure(''); setBigbasket(''); setMilk(''); setBread(''); setRent('');
-        setElectricity(''); setGas(''); setSalary(''); setOther('');
-      } else {
-        setMessage(`❌ ${data.error}`);
-      }
-    } catch (err: any) {
-      setMessage(`❌ ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+    setIsDragOver(false);
+    addFiles(e.dataTransfer.files);
   };
+
+  const handleParse = async () => {
+    if (rows.length === 0) return;
+    const snapshot = [...rows];
+    setPageState('parsing');
+    setParseProgress({ current: 0, total: snapshot.length });
+    setRows(prev => prev.map(r => ({ ...r, status: 'parsing' })));
+
+    let completed = 0;
+
+    await Promise.allSettled(snapshot.map(async (row) => {
+      const fd = new FormData();
+      fd.append('file', row.file);
+      fd.append('restaurantId', RESTAURANT_ID);
+      fd.append('month', month);
+
+      try {
+        const res  = await fetch('/api/backfill', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        setRows(prev => prev.map(r => {
+          if (r.id !== row.id) return r;
+          if (data.success) {
+            const isDup = data.parsed.is_duplicate;
+            return { ...r, status: isDup ? 'duplicate' : 'success', parsed: data.parsed, include: !isDup };
+          }
+          return { ...r, status: 'error', error: data.error || 'Parse failed' };
+        }));
+      } catch (err: any) {
+        setRows(prev => prev.map(r =>
+          r.id === row.id ? { ...r, status: 'error', error: err.message } : r
+        ));
+      }
+
+      completed++;
+      setParseProgress({ current: completed, total: snapshot.length });
+    }));
+
+    setPageState('review');
+  };
+
+  const handleSaveAll = async () => {
+    const toSave = rows.filter(r => r.include && (r.status === 'success' || r.status === 'duplicate'));
+    if (toSave.length === 0) return;
+
+    setPageState('saving');
+    setSaveProgress({ current: 0, total: toSave.length });
+
+    let billsSaved = 0, itemsSaved = 0, totalAmount = 0;
+
+    for (let i = 0; i < toSave.length; i++) {
+      const row = toSave[i];
+      setSaveProgress({ current: i + 1, total: toSave.length });
+
+      try {
+        const res = await fetch('/api/backfill/confirm', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            restaurantId: RESTAURANT_ID,
+            parsed:       row.parsed,
+            month,
+            force:        row.status === 'duplicate',
+          }),
+        });
+        const data = await res.json();
+        if (data.success && !data.skipped) {
+          billsSaved++;
+          itemsSaved  += data.itemsSaved  || 0;
+          totalAmount += row.parsed?.total || 0;
+        }
+      } catch (err) {
+        console.error('Save failed:', row.file.name, err);
+      }
+    }
+
+    setDoneSummary({ billsSaved, itemsSaved, totalAmount });
+    setPageState('done');
+  };
+
+  const handleReset = () => {
+    setRows([]);
+    setPageState('idle');
+    setDoneSummary(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const activeRows  = rows.filter(r => r.include && (r.status === 'success' || r.status === 'duplicate'));
+  const totalValue  = activeRows.reduce((s, r) => s + (r.parsed?.total || 0), 0);
+  const dupExcluded = rows.filter(r => r.status === 'duplicate' && !r.include).length;
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'bills',    label: 'Bills (PDF/Photo)' },
+    { key: 'expenses', label: 'Expenses (Excel)'  },
+    { key: 'sales',    label: 'Sales (CSV)'        },
+  ];
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-8">FinMitra Backfill Wizard</h1>
+    <div className="min-h-screen bg-gray-50">
 
-      {/* Manual Entry */}
-      <form onSubmit={handleManualSubmit} className="bg-white p-6 rounded-xl shadow mb-10">
-        <h2 className="text-xl font-semibold mb-4">Manual Daily Entry</h2>
-        <div className="grid grid-cols-2 gap-6">
+      {/* ── Header ── */}
+      <div className="bg-white border-b shadow-sm px-8 py-4 flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">FinMitra Backfill Portal</h1>
+        <input
+          type="month"
+          value={month}
+          onChange={e => setMonth(e.target.value)}
+          disabled={pageState !== 'idle'}
+          className="border rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        />
+      </div>
+
+      <div className="max-w-5xl mx-auto p-8">
+
+        {/* ── Tabs ── */}
+        <div className="flex border-b mb-8">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-6 py-3 font-medium text-sm border-b-2 -mb-px transition-colors ${
+                tab === t.key
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Non-bills tabs ── */}
+        {tab !== 'bills' && (
+          <div className="text-center text-gray-400 py-20 text-lg">Coming soon</div>
+        )}
+
+        {/* ── Bills tab ── */}
+        {tab === 'bills' && (
           <div>
-            <label className="block text-sm font-medium mb-1">Date</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-3 border rounded-lg" required />
-          </div>
 
-          {/* Revenue */}
-          <div className="col-span-2">
-            <h3 className="font-medium mb-3 text-green-700">Revenue / Sales</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm">Sales (QR)</label>
-                <input type="number" value={salesQr} onChange={(e) => setSalesQr(e.target.value)} className="w-full p-3 border rounded-lg" />
+            {/* ══ IDLE ══ */}
+            {pageState === 'idle' && (
+              <div className="space-y-5">
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition-all select-none ${
+                    isDragOver
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-300 hover:border-gray-400 bg-white'
+                  }`}
+                >
+                  <div className="text-5xl mb-4">📁</div>
+                  <p className="text-xl font-medium text-gray-700">Drop PDFs or photos here</p>
+                  <p className="text-gray-400 mt-1 text-sm">or click to browse</p>
+                  <p className="text-xs text-gray-300 mt-3">PDF · JPEG · PNG · HEIC · WebP</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,image/jpeg,image/png,image/heic,image/webp"
+                    multiple
+                    className="hidden"
+                    onChange={e => { if (e.target.files) addFiles(e.target.files); }}
+                  />
+                </div>
+
+                {rows.length > 0 && (
+                  <div className="bg-white rounded-xl border divide-y">
+                    {rows.map(row => (
+                      <div key={row.id} className="flex items-center justify-between px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{row.file.type.includes('pdf') ? '📄' : '🖼️'}</span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{row.file.name}</p>
+                            <p className="text-xs text-gray-400">{formatBytes(row.file.size)}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeRow(row.id)}
+                          className="text-gray-300 hover:text-red-500 text-xl px-2 leading-none"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleParse}
+                  disabled={rows.length === 0}
+                  className={`w-full py-4 rounded-xl font-semibold text-lg transition-all ${
+                    rows.length > 0
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Parse Bills{rows.length > 0 ? ` (${rows.length})` : ''}
+                </button>
               </div>
-              <div>
-                <label className="block text-sm">Sales (Cash)</label>
-                <input type="number" value={salesCash} onChange={(e) => setSalesCash(e.target.value)} className="w-full p-3 border rounded-lg" />
-              </div>
-            </div>
-          </div>
-
-          {/* Expenses */}
-          <div className="col-span-2">
-            <h3 className="font-medium mb-3 text-red-700">Expenses</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <input placeholder="Swiggy" value={swiggy} onChange={(e) => setSwiggy(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Zomato" value={zomato} onChange={(e) => setZomato(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Hyperpure" value={hyperpure} onChange={(e) => setHyperpure(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="BigBasket" value={bigbasket} onChange={(e) => setBigbasket(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Milk" value={milk} onChange={(e) => setMilk(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Bread" value={bread} onChange={(e) => setBread(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Rent" value={rent} onChange={(e) => setRent(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Electricity" value={electricity} onChange={(e) => setElectricity(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Gas" value={gas} onChange={(e) => setGas(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Salary" value={salary} onChange={(e) => setSalary(e.target.value)} className="p-3 border rounded-lg" />
-              <input placeholder="Other" value={other} onChange={(e) => setOther(e.target.value)} className="p-3 border rounded-lg" />
-            </div>
-          </div>
-        </div>
-        <button type="submit" disabled={loading} className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-medium">
-          {loading ? 'Saving...' : 'Save Manual Entry'}
-        </button>
-      </form>
-
-      {/* Bulk Upload */}
-      <div className="bg-white p-6 rounded-xl shadow">
-        <h2 className="text-xl font-semibold mb-4">Bulk Upload (Excel / CSV)</h2>
-
-        <div className="flex gap-4 mb-6">
-          <button onClick={() => downloadTemplate('pnl')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-medium">
-            📥 Download PnL Template
-          </button>
-          <button onClick={() => downloadTemplate('invoice')} className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-medium">
-            📥 Download Invoice Template
-          </button>
-        </div>
-
-        <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={handleFileChange}
-            className="hidden"
-            id="file-upload"
-          />
-          <label htmlFor="file-upload" className="cursor-pointer block">
-            <div className="text-4xl mb-2">📤</div>
-            <p className="font-medium">Click to select Excel / CSV file</p>
-            {selectedFile && (
-              <p className="mt-4 text-green-600 font-medium">
-                ✅ Selected: {selectedFile.name}
-              </p>
             )}
-          </label>
-        </div>
 
-        <button
-          onClick={handleFileUpload}
-          disabled={!selectedFile || loading}
-          className={`mt-6 w-full py-4 rounded-xl font-medium text-white transition-all ${
-            selectedFile && !loading
-              ? 'bg-blue-600 hover:bg-blue-700'
-              : 'bg-gray-300 cursor-not-allowed'
-          }`}
-        >
-          {loading ? 'Uploading...' : 'Upload File Now'}
-        </button>
+            {/* ══ PARSING ══ */}
+            {pageState === 'parsing' && (
+              <div className="space-y-5">
+                <div className="bg-white rounded-xl border p-6 space-y-3">
+                  <p className="text-sm font-medium text-gray-600">
+                    Parsing {parseProgress.current} of {parseProgress.total}…
+                  </p>
+                  <div className="w-full bg-gray-100 rounded-full h-2.5">
+                    <div
+                      className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${parseProgress.total ? (parseProgress.current / parseProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
 
-        {message && (
-          <div className={`mt-4 p-4 rounded-xl text-center font-medium ${message.includes('✅') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-            {message}
+                <div className="bg-white rounded-xl border divide-y">
+                  {rows.map(row => (
+                    <div key={row.id} className="flex items-center gap-4 px-5 py-3.5">
+                      <div className="w-6 text-center shrink-0">
+                        <StatusIcon status={row.status} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate">{row.file.name}</p>
+                        {row.status === 'success' && row.parsed && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {row.parsed.vendor} · ₹{row.parsed.total.toLocaleString('en-IN')}
+                          </p>
+                        )}
+                        {row.status === 'error' && (
+                          <p className="text-xs text-red-500 mt-0.5">{row.error}</p>
+                        )}
+                        {row.status === 'parsing' && (
+                          <p className="text-xs text-blue-400 mt-0.5">Parsing with Claude Vision…</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ══ REVIEW ══ */}
+            {pageState === 'review' && (
+              <div className="space-y-4">
+                <div className="overflow-x-auto bg-white rounded-xl border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <th className="px-4 py-3 w-10"></th>
+                        <th className="px-4 py-3">File</th>
+                        <th className="px-4 py-3">Vendor</th>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                        <th className="px-4 py-3 text-center">Items</th>
+                        <th className="px-4 py-3">Duplicate?</th>
+                        <th className="px-4 py-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {rows.map(row => (
+                        <Fragment key={row.id}>
+                          <tr className={
+                            row.status === 'duplicate' ? 'bg-yellow-50'
+                            : row.status === 'error' ? 'bg-red-50'
+                            : ''
+                          }>
+                            <td className="px-4 py-3 text-center">
+                              <StatusIcon status={row.status} />
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-gray-800 truncate max-w-[160px]" title={row.file.name}>
+                                {row.file.name}
+                              </p>
+                              <p className="text-xs text-gray-400">{formatBytes(row.file.size)}</p>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">{row.parsed?.vendor || '—'}</td>
+                            <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                              {row.parsed ? formatDate(row.parsed.date) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                              {row.parsed ? `₹${row.parsed.total.toLocaleString('en-IN')}` : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-center text-gray-600">
+                              {row.parsed ? row.parsed.items.length : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              {row.status === 'duplicate' && row.parsed ? (
+                                <div>
+                                  <p className="text-xs text-yellow-700 mb-1.5">
+                                    A {row.parsed.vendor} bill of{' '}
+                                    ₹{row.parsed.existing_record?.amount.toLocaleString('en-IN') ?? row.parsed.total.toLocaleString('en-IN')}{' '}
+                                    already exists for {formatDate(row.parsed.date)}.
+                                    Save anyway?
+                                  </p>
+                                  <label className="flex items-center gap-1.5 cursor-pointer text-xs text-gray-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={row.include}
+                                      onChange={() => toggleInclude(row.id)}
+                                      className="rounded"
+                                    />
+                                    Yes, save anyway
+                                  </label>
+                                </div>
+                              ) : row.status === 'error' ? (
+                                <span className="text-xs text-red-500">{row.error}</span>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                {row.parsed && (
+                                  <button
+                                    onClick={() => toggleExpand(row.id)}
+                                    className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+                                  >
+                                    {row.expanded ? 'Hide items' : 'View items'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => removeRow(row.id)}
+                                  className="text-xs text-red-500 hover:underline"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expanded items sub-row */}
+                          {row.expanded && row.parsed && (
+                            <tr className="bg-gray-50">
+                              <td colSpan={8} className="px-8 py-4">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-gray-400 font-semibold uppercase tracking-wider">
+                                      <th className="text-left pb-2 pr-4">Ingredient</th>
+                                      <th className="text-left pb-2 pr-4">Item Name</th>
+                                      <th className="text-right pb-2 pr-4">Qty</th>
+                                      <th className="text-left pb-2 pr-4">Unit</th>
+                                      <th className="text-right pb-2 pr-4">Rate</th>
+                                      <th className="text-right pb-2">Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100">
+                                    {row.parsed.items.map((item, idx) => (
+                                      <tr key={idx}>
+                                        <td className="py-1.5 pr-4 font-medium text-gray-700">
+                                          {item.item_canonical || '—'}
+                                        </td>
+                                        <td className="py-1.5 pr-4 text-gray-500">{item.item_name}</td>
+                                        <td className="py-1.5 pr-4 text-right text-gray-600">
+                                          {item.quantity_normalised ?? item.quantity ?? '—'}
+                                        </td>
+                                        <td className="py-1.5 pr-4 text-gray-600">
+                                          {item.unit_normalised || item.unit || '—'}
+                                        </td>
+                                        <td className="py-1.5 pr-4 text-right text-gray-600">
+                                          {item.rate ? `₹${Number(item.rate).toLocaleString('en-IN')}` : '—'}
+                                        </td>
+                                        <td className="py-1.5 text-right font-semibold text-gray-800">
+                                          ₹{Number(item.amount).toLocaleString('en-IN')}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                    {row.parsed.delivery_fee > 0 && (
+                                      <tr className="text-yellow-700 border-t border-yellow-100">
+                                        <td className="py-1.5 pr-4 font-medium">Delivery Fee</td>
+                                        <td colSpan={4} className="py-1.5 pr-4 text-gray-400">
+                                          separated from food COGS → other
+                                        </td>
+                                        <td className="py-1.5 text-right font-semibold">
+                                          ₹{row.parsed.delivery_fee.toLocaleString('en-IN')}
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary bar + actions */}
+                <div className="bg-white rounded-xl border px-6 py-4 flex items-center justify-between">
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold text-gray-900">{activeRows.length} bill{activeRows.length !== 1 ? 's' : ''} ready</span>
+                    {' · '}
+                    <span className="font-semibold text-gray-900">₹{totalValue.toLocaleString('en-IN')} total</span>
+                    {dupExcluded > 0 && (
+                      <span className="text-yellow-600">
+                        {' · '}{dupExcluded} duplicate{dupExcluded !== 1 ? 's' : ''} excluded
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleReset}
+                      className="px-5 py-2 rounded-lg border text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      Clear All
+                    </button>
+                    <button
+                      onClick={handleSaveAll}
+                      disabled={activeRows.length === 0}
+                      className={`px-6 py-2 rounded-lg text-sm font-semibold text-white transition-colors ${
+                        activeRows.length > 0
+                          ? 'bg-green-600 hover:bg-green-700'
+                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Save All ({activeRows.length})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══ SAVING ══ */}
+            {pageState === 'saving' && (
+              <div className="bg-white rounded-xl border p-12 text-center space-y-5">
+                <p className="text-xl font-medium text-gray-700">
+                  Saving bill {saveProgress.current} of {saveProgress.total}…
+                </p>
+                <div className="w-full bg-gray-100 rounded-full h-3">
+                  <div
+                    className="bg-green-500 h-3 rounded-full transition-all duration-500"
+                    style={{ width: `${saveProgress.total ? (saveProgress.current / saveProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+                <p className="text-sm text-gray-400">Please wait, do not close this page</p>
+              </div>
+            )}
+
+            {/* ══ DONE ══ */}
+            {pageState === 'done' && doneSummary && (
+              <div className="bg-white rounded-xl border p-14 text-center space-y-4">
+                <div className="text-6xl mb-2">🎉</div>
+                <h2 className="text-2xl font-bold text-gray-900">All done!</h2>
+                <div className="text-base space-y-2 text-gray-700">
+                  <p>✅ {doneSummary.billsSaved} bill{doneSummary.billsSaved !== 1 ? 's' : ''} saved successfully</p>
+                  <p>📦 {doneSummary.itemsSaved} item{doneSummary.itemsSaved !== 1 ? 's' : ''} added to purchase history</p>
+                  <p>
+                    💰 ₹{doneSummary.totalAmount.toLocaleString('en-IN')} added to{' '}
+                    {new Date(month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })} P&amp;L
+                  </p>
+                </div>
+                <button
+                  onClick={handleReset}
+                  className="mt-6 px-10 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-lg transition-colors"
+                >
+                  Upload More
+                </button>
+              </div>
+            )}
+
           </div>
         )}
       </div>

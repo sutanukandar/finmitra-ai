@@ -1,121 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parser } from '../webhook/parser';
 import { dataService } from '../../../lib/db/dataService';
-import * as XLSX from 'xlsx';
-
-function excelDateToISO(value: any): string {
-  if (!value) return new Date().toISOString().split('T')[0];
-  if (typeof value === 'string') {
-    if (value.includes('-')) return value.split('T')[0];
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  }
-  const serial = Number(value);
-  if (!isNaN(serial) && serial > 0) {
-    const utc_days = Math.floor(serial - 25569);
-    const date = new Date(utc_days * 86400 * 1000);
-    return date.toISOString().split('T')[0];
-  }
-  return new Date().toISOString().split('T')[0];
-}
 
 export async function POST(req: NextRequest) {
   try {
-    const contentType = req.headers.get('content-type') || '';
-
-    if (contentType.includes('application/json')) {
-      const body = await req.json();
-      const { restaurant_id, entries } = body;
-      if (!restaurant_id || !entries || !Array.isArray(entries)) {
-        return NextResponse.json({ error: "Missing restaurant_id or entries" }, { status: 400 });
-      }
-      return await processEntries(restaurant_id, entries);
-    }
-
-    // Excel upload
     const formData = await req.formData();
-    const file = formData.get('file') as File;
-    const restaurant_id = formData.get('restaurant_id') as string;
+    const file         = formData.get('file') as File | null;
+    const restaurantId = formData.get('restaurantId') as string | null;
+    const month        = formData.get('month') as string | null;
 
-    if (!file || !restaurant_id) {
-      return NextResponse.json({ error: "File and restaurant_id required" }, { status: 400 });
+    if (!file || !restaurantId) {
+      return NextResponse.json({ success: false, error: 'file and restaurantId required' }, { status: 400 });
     }
 
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array' });
+    const buffer      = await file.arrayBuffer();
+    const base64Data  = Buffer.from(buffer).toString('base64');
+    const contentType = file.type || 'image/jpeg';
 
-    const entries: any[] = [];
+    const parseResult = await parser.parseMediaBase64(base64Data, contentType);
 
-    // Item Level sheet (main fix)
-    const itemsSheet = workbook.Sheets['Item Level'] || workbook.Sheets['Sheet2'];
-    if (itemsSheet) {
-      const data = XLSX.utils.sheet_to_json(itemsSheet);
-      const dateTotals: { [date: string]: number } = {};
-
-      data.forEach((row: any) => {
-        const date = excelDateToISO(row.date);
-        const amount = Number(row.amount) || 0;
-
-        // Track total for PnL
-        if (!dateTotals[date]) dateTotals[date] = 0;
-        dateTotals[date] += amount;
-
-        // Save exact item row
-        entries.push({
-          date,
-          items: [{
-            item_name: row.item_name || row.Item || row.item || 'Unknown Item',
-            quantity: Number(row.quantity) || 1,
-            unit: row.unit || '',
-            amount: amount,
-            vendor: row.vendor || row.Vendor || 'Unknown'
-          }]
-        });
-      });
-
-      // Create PnL entry for every date that has items
-      Object.keys(dateTotals).forEach(date => {
-        entries.push({
-          date,
-          totals: { other: dateTotals[date] }
-        });
-      });
+    if (!parseResult.success) {
+      return NextResponse.json({ success: false, error: parseResult.extracted || 'Parse failed' });
     }
 
-    if (entries.length === 0) {
-      return NextResponse.json({ error: "No data found in file" }, { status: 400 });
-    }
+    const vendor = parseResult.vendor || '';
+    const date   = parseResult.date   || (month ? month + '-01' : new Date().toISOString().split('T')[0]);
+    const total  = parseResult.total  || 0;
 
-    return await processEntries(restaurant_id, entries);
+    const dupCheck = await dataService.checkDuplicateBill(restaurantId, vendor, date, total);
+
+    return NextResponse.json({
+      success: true,
+      parsed: {
+        vendor:          parseResult.vendor,
+        date:            parseResult.date,
+        total:           parseResult.total,
+        items:           parseResult.items || [],
+        delivery_fee:    parseResult.delivery_fee || 0,
+        is_duplicate:    dupCheck.isDuplicate,
+        existing_record: dupCheck.existingRecord
+          ? { amount: dupCheck.existingRecord.amount, created_at: dupCheck.existingRecord.created_at }
+          : null,
+      }
+    });
 
   } catch (error: any) {
-    console.error("[Backfill API] Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[Backfill API] Error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
-}
-
-async function processEntries(restaurant_id: string, entries: any[]) {
-  const results = [];
-
-  for (const entry of entries) {
-    const { date, totals, items } = entry;
-
-    if (totals && Object.keys(totals).length > 0) {
-      const { success } = await dataService.upsertPnlEntry(restaurant_id, {
-        date: date,
-        ...totals
-      });
-      results.push({ date, type: "pnl_totals", success });
-    }
-
-    if (items && Array.isArray(items) && items.length > 0) {
-      const vendor = items[0].vendor || 'Backfill';
-      await dataService.saveInvoiceItems(restaurant_id, vendor, date, items);
-      results.push({ date, type: "items", count: items.length, success: true });
-    }
-  }
-
-  return NextResponse.json({
-    success: true,
-    message: "✅ Backfill completed! Both invoice_items and pnl_entries updated.",
-    results
-  });
 }

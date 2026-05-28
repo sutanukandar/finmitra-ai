@@ -84,33 +84,11 @@ Example outputs:
     }
   },
 
-  async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
-    console.log(`[Parser] Starting media parse. URL: ${mediaUrl}, Type: ${mediaType}`);
-
+  async parseMediaBase64(base64Data: string, contentType: string): Promise<MediaParseResult> {
     try {
-      // Download media from Twilio using Basic Auth
-      const auth = Buffer.from(
-        `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
-      ).toString('base64');
-
-      console.log('[Parser] Downloading media from Twilio...');
-      const mediaResponse = await fetch(mediaUrl, {
-        headers: { Authorization: `Basic ${auth}` }
-      });
-
-      if (!mediaResponse.ok) {
-        throw new Error(`Twilio download failed: ${mediaResponse.status} ${mediaResponse.statusText}`);
-      }
-
-      const mediaBuffer = await mediaResponse.arrayBuffer();
-      const base64Data = Buffer.from(mediaBuffer).toString('base64');
-      console.log(`[Parser] Downloaded ${mediaBuffer.byteLength} bytes`);
-
-      const contentType = mediaType || 'image/jpeg';
       const isPdf = contentType.includes('pdf');
-      console.log(`[Parser] Content type: ${contentType}, isPDF: ${isPdf}`);
+      console.log(`[Parser] parseMediaBase64: contentType=${contentType}, isPDF=${isPdf}, bytes=${Math.round(base64Data.length * 0.75)}`);
 
-      // Build Claude content block for PDF or image
       const mediaBlock = isPdf
         ? {
             type: 'document' as const,
@@ -189,7 +167,6 @@ Rules:
 
       console.log('[Parser] Claude response:', responseText.substring(0, 300));
 
-      // Strip markdown code fences if present
       responseText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const parsed = JSON.parse(responseText);
@@ -202,14 +179,12 @@ Rules:
       }
       console.log(`[Parser] Date converted: ${parsed.date} → ${isoDate}`);
 
-      // Enrich each item with mapped_category and ensure 'name' field for compatibility
       const allItems = (parsed.items || []).map((item: any) => ({
         ...item,
         name: item.item_name || item.name || 'Unknown Item',
         mapped_category: 'cogs'
       }));
 
-      // Separate delivery/shipping charges from food items
       const DELIVERY_RE = /delivery|shipping|freight|pay on delivery/i;
       const foodItems     = allItems.filter((i: any) => !DELIVERY_RE.test(i.item_name || ''));
       const deliveryItems = allItems.filter((i: any) =>  DELIVERY_RE.test(i.item_name || ''));
@@ -231,11 +206,38 @@ Rules:
       };
 
     } catch (error: any) {
+      console.error('[Parser] parseMediaBase64 failed:', error);
+      return { success: false, extracted: error.message || 'Unknown error' };
+    }
+  },
+
+  async parseMedia(mediaUrl: string, mediaType: string | null): Promise<MediaParseResult> {
+    console.log(`[Parser] Starting media parse. URL: ${mediaUrl}, Type: ${mediaType}`);
+
+    try {
+      const auth = Buffer.from(
+        `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+      ).toString('base64');
+
+      console.log('[Parser] Downloading media from Twilio...');
+      const mediaResponse = await fetch(mediaUrl, {
+        headers: { Authorization: `Basic ${auth}` }
+      });
+
+      if (!mediaResponse.ok) {
+        throw new Error(`Twilio download failed: ${mediaResponse.status} ${mediaResponse.statusText}`);
+      }
+
+      const mediaBuffer = await mediaResponse.arrayBuffer();
+      const base64Data = Buffer.from(mediaBuffer).toString('base64');
+      console.log(`[Parser] Downloaded ${mediaBuffer.byteLength} bytes`);
+
+      const contentType = mediaType || 'image/jpeg';
+      return await this.parseMediaBase64(base64Data, contentType);
+
+    } catch (error: any) {
       console.error('[Parser] parseMedia failed:', error);
-      return {
-        success: false,
-        extracted: error.message || 'Unknown error'
-      };
+      return { success: false, extracted: error.message || 'Unknown error' };
     }
   }
 };
