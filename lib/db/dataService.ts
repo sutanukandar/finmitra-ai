@@ -166,8 +166,9 @@ export const dataService = {
 
     if (!data) return { isDuplicate: false };
 
-    const existingAmount = data[category] !== null && data[category] !== undefined
-      ? Number(data[category])
+    const row = data as any;
+    const existingAmount = row[category] !== null && row[category] !== undefined
+      ? Number(row[category])
       : null;
 
     if (existingAmount === null) return { isDuplicate: false };
@@ -263,7 +264,7 @@ export const dataService = {
       .eq('date', date)
       .maybeSingle();
 
-    const existing = Number(data?.[category] || 0);
+    const existing = Number((data as any)?.[category] || 0);
     const newTotal = existing + amount;
 
     const { error } = await supabase
