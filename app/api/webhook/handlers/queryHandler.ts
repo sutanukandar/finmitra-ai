@@ -31,9 +31,11 @@ export async function handlePnlQuery(from: string, restaurantId: string, body: s
     let revenue = 0, cogs = 0, fixed = 0;
 
     entries.forEach((e: any) => {
-      revenue += (e.swiggy || 0) + (e.phonepe || 0);
-      cogs += (e.hyperpure || 0) + (e.bigbasket || 0) + (e.milk || 0) + (e.bread || 0);
-      fixed += (e.rent || 0) + (e.electricity || 0) + (e.gas || 0) + (e.salary || 0) + (e.fixed || 0);
+      revenue += (e.sales || 0) + (e.swiggy || 0) + (e.zomato || 0) + (e.phonepe || 0);
+      cogs    += (e.hyperpure || 0) + (e.bigbasket || 0) + (e.milk || 0) +
+                 (e.bread || 0) + (e.other || 0);
+      fixed   += (e.rent || 0) + (e.electricity || 0) + (e.gas || 0) +
+                 (e.salary || 0) + (e.fixed || 0);
     });
 
     const grossProfit = revenue - cogs;

@@ -1,6 +1,7 @@
 import { parser } from '../parser';
 import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
+import { handlePnlQuery } from './queryHandler';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   console.log(`[TextHandler] Processing text message from ${restaurantId}: "${body}"`);
@@ -83,7 +84,7 @@ Reply *haan* to save anyway · *nahi* to cancel`
       }
     } 
     else if (parsed.intent === "query_today" || parsed.intent === "query_mtd" || parsed.intent === "query_lastmonth") {
-      await sendMessage(from, "Query received. Processing P&L...");
+      await handlePnlQuery(from, restaurantId, body);
     } 
     else {
       await sendMessage(from, "✅ Got it!\nTry:\n• today sales 3500\n• aaj sales 4200\n• aaj ka P&L");
