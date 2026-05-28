@@ -6,6 +6,22 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function normaliseVendor(raw: string): string {
+  const v = (raw || '').toLowerCase();
+  if (v.includes('hyperpure') || (v.includes('zomato') && !v.includes('swiggy')))
+    return 'Zomato Hyperpure Private Limited';
+  if (v.includes('bigbasket') || v.includes('big basket') ||
+      v.includes('bbnow') || v.includes('bb now') ||
+      v.includes('innovative retail'))
+    return 'BigBasket Now';
+  if (v.includes('dmart') || v.includes('avenue e-commerce') ||
+      v.includes('avenue e commerce'))
+    return 'DMart';
+  if (v.includes('swiggy'))
+    return 'Swiggy';
+  return raw.trim();
+}
+
 export const dataService = {
 
   async upsertPnlEntry(restaurantId: string, arg2: any, arg3?: any) {
@@ -126,7 +142,7 @@ export const dataService = {
   ) {
     const insertData = items.map(item => ({
       restaurant_id:       restaurantId,
-      vendor:              vendor,
+      vendor:              normaliseVendor(item.vendor || vendor),
       date:                date,
       item_name:           item.item_name || item.name || 'Unknown Item',
       item_canonical:      item.item_canonical || null,

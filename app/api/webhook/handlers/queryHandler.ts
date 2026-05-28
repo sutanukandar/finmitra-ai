@@ -223,6 +223,65 @@ ${vendorLines}`
       return;
     }
 
+    // ── query_vendor_breakdown: expense split by vendor ──────────────────
+    if (parsed?.intent === 'query_vendor_breakdown') {
+      let startDate: string, endDate: string;
+      if (parsed.period === 'specific_month' && parsed.month) {
+        const [y, m] = parsed.month.split('-').map(Number);
+        startDate = parsed.month + '-01';
+        endDate   = new Date(y, m, 0).toISOString().split('T')[0];
+      } else if (parsed.period === 'today') {
+        startDate = today; endDate = today;
+      } else {
+        startDate = monthStart; endDate = today;
+      }
+
+      const { data: items } = await supabase
+        .from('invoice_items')
+        .select('vendor, amount')
+        .eq('restaurant_id', restaurantId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+      if (!items || items.length === 0) {
+        await sendMessage(from, 'No expense data found for this period.');
+        return;
+      }
+
+      const normalise = (v: string) => {
+        const lv = (v || '').toLowerCase();
+        if (lv.includes('hyperpure') || lv.includes('zomato')) return 'Hyperpure';
+        if (lv.includes('bigbasket') || lv.includes('bbnow') ||
+            lv.includes('bb now') || lv.includes('innovative retail')) return 'BigBasket';
+        if (lv.includes('dmart') || lv.includes('avenue e-commerce') ||
+            lv.includes('avenue e commerce')) return 'DMart';
+        return v.trim();
+      };
+
+      const grouped: Record<string, number> = {};
+      (items as any[]).forEach(r => {
+        const key = normalise(r.vendor);
+        grouped[key] = (grouped[key] || 0) + Number(r.amount);
+      });
+
+      const sorted     = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
+      const grandTotal = sorted.reduce((s, [, v]) => s + v, 0);
+
+      const periodLabel = parsed.period === 'specific_month' && parsed.month
+        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+        : parsed.period === 'today' ? 'Today'
+        : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+
+      const lines = sorted.map(([vendor, spend], idx) =>
+        `${idx + 1}. ${vendor} — ₹${spend.toLocaleString('en-IN')}`
+      );
+
+      await sendMessage(from,
+        `📊 *Expenses by Vendor — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`
+      );
+      return;
+    }
+
     // ── full P&L summary ─────────────────────────────────────────────────
     let startDate = today;
     let endDate: string | undefined;

@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, query_ingredient, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, query_ingredient, query_vendor_breakdown, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -64,6 +64,13 @@ For query_ingredient — user asks about a specific ingredient across vendors:
 - ingredient: always Capitalised, generic name (Carrot not fresho carrot)
 - period: "today" | "mtd" | "specific_month"
 - month: "YYYY-MM" — only when period = "specific_month"
+
+For query_vendor_breakdown — user asks for expense split by vendor/supplier:
+- "how much expense from BigBasket, Hyperpure, DMart"
+- "vendor wise expense in March 2026" → {"intent": "query_vendor_breakdown", "period": "specific_month", "month": "2026-03"}
+- "supplier wise kharch in Mar 26" → {"intent": "query_vendor_breakdown", "period": "specific_month", "month": "2026-03"}
+- "kitna kharcha kiya har vendor pe is mahine" → {"intent": "query_vendor_breakdown", "period": "mtd"}
+- period: "today" | "mtd" | "specific_month"; month: "YYYY-MM" only for specific_month
 
 For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
   → {"intent": "query_today"} or {"intent": "query_mtd"}
