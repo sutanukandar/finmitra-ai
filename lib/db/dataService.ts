@@ -176,7 +176,7 @@ export const dataService = {
     return {
       isDuplicate: existingAmount === amount,
       existingAmount,
-      enteredAt: data.updated_at
+      enteredAt: row.updated_at
     };
   },
 
