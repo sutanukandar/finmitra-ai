@@ -84,9 +84,8 @@ Reply *haan* to save anyway · *nahi* to cancel`
       }
     } 
     else if (
-      parsed.intent === "query_today" || parsed.intent === "query_mtd" ||
-      parsed.intent === "query_lastmonth" || parsed.intent === "query_specific" ||
-      parsed.intent === "query_items"
+      ['query_today','query_mtd','query_lastmonth',
+       'query_specific','query_items','query_ingredient'].includes(parsed.intent)
     ) {
       await handlePnlQuery(from, restaurantId, body, parsed);
     } 

@@ -3,7 +3,7 @@
 // =============================================
 
 export interface ParsedIntent {
-  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_items' | 'help' | 'unknown';
+  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_items' | 'query_ingredient' | 'help' | 'unknown';
   entries?: Array<{
     category: string;
     amount: number;
@@ -14,6 +14,8 @@ export interface ParsedIntent {
   date?: string;           // for query_items specific_date: YYYY-MM-DD
   vendor_filter?: string | null;  // for query_items: 'hyperpure' | 'bigbasket' | 'dmart' | null
   limit?: number;          // for query_items: default 5
+  ingredient?: string;     // for query_ingredient: e.g. "Carrot"
+  month?: string;          // for query_ingredient specific_month: YYYY-MM
 }
 
 export interface PnlEntryData {

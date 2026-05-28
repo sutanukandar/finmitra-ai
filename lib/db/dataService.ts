@@ -125,17 +125,20 @@ export const dataService = {
     uploadRecordId?: string
   ) {
     const insertData = items.map(item => ({
-      restaurant_id: restaurantId,
-      vendor: vendor,
-      date: date,
-      item_name: item.item_name || item.name || 'Unknown Item',
-      quantity: item.quantity || 1,
-      unit: item.unit || '',
-      rate: item.rate || 0,
-      amount: item.amount || 0,
-      mapped_category: item.mapped_category || 'fixed',
-      upload_record_id: uploadRecordId || null,
-      metadata: { invoice_number: item.invoice_number || '' }
+      restaurant_id:       restaurantId,
+      vendor:              vendor,
+      date:                date,
+      item_name:           item.item_name || item.name || 'Unknown Item',
+      item_canonical:      item.item_canonical || null,
+      unit_normalised:     item.unit_normalised || null,
+      quantity_normalised: item.quantity_normalised || null,
+      quantity:            item.quantity || 1,
+      unit:                item.unit || '',
+      rate:                item.rate || 0,
+      amount:              item.amount || 0,
+      mapped_category:     item.mapped_category || 'cogs',
+      upload_record_id:    uploadRecordId || null,
+      metadata:            { invoice_number: item.invoice_number || '' }
     }));
 
     const { error } = await supabase

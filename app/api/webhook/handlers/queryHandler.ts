@@ -115,6 +115,79 @@ export async function handlePnlQuery(
       return;
     }
 
+    // ── query_ingredient: single ingredient deep-dive ────────────────────
+    if (parsed?.intent === 'query_ingredient') {
+      const ingredient = parsed.ingredient || '';
+      if (!ingredient) {
+        await sendMessage(from, "Which ingredient would you like to check? e.g. \"how much Carrot did I buy this month\"");
+        return;
+      }
+
+      let startDate: string, endDate: string;
+      if (parsed.period === 'specific_month' && parsed.month) {
+        startDate = parsed.month + '-01';
+        const d = new Date(startDate);
+        endDate = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
+      } else if (parsed.period === 'today') {
+        startDate = today;
+        endDate   = today;
+      } else {
+        startDate = monthStart;
+        endDate   = today;
+      }
+
+      const { data: rows } = await supabase
+        .from('invoice_items')
+        .select('item_name, item_canonical, vendor, quantity_normalised, unit_normalised, quantity, unit, amount, date')
+        .eq('restaurant_id', restaurantId)
+        .ilike('item_canonical', `%${ingredient}%`)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('date', { ascending: true });
+
+      if (!rows || rows.length === 0) {
+        await sendMessage(from, `No ${ingredient} purchases found for this period.`);
+        return;
+      }
+
+      const totalSpend   = (rows as any[]).reduce((s, r) => s + Number(r.amount), 0);
+      const totalQtyNorm = (rows as any[]).reduce((s, r) => s + Number(r.quantity_normalised || r.quantity || 0), 0);
+      const unit         = (rows[0] as any).unit_normalised || (rows[0] as any).unit || 'units';
+      const avgRate      = totalQtyNorm > 0 ? totalSpend / totalQtyNorm : 0;
+
+      const byVendor: Record<string, { qty: number; spend: number }> = {};
+      (rows as any[]).forEach(r => {
+        const v = r.vendor || 'Unknown';
+        if (!byVendor[v]) byVendor[v] = { qty: 0, spend: 0 };
+        byVendor[v].qty   += Number(r.quantity_normalised || r.quantity || 0);
+        byVendor[v].spend += Number(r.amount);
+      });
+
+      const vendorLines = Object.entries(byVendor)
+        .sort((a, b) => b[1].spend - a[1].spend)
+        .map(([v, d]) => `  • ${v}: ${d.qty.toFixed(2)} ${unit} — ₹${d.spend.toLocaleString('en-IN')}`)
+        .join('\n');
+
+      const periodLabel = parsed.period === 'specific_month' && parsed.month
+        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+        : parsed.period === 'today'
+        ? 'Today'
+        : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+
+      await sendMessage(from,
+`📦 *${ingredient} — ${periodLabel}*
+
+Total bought : ${totalQtyNorm.toFixed(2)} ${unit}
+Total spent  : ₹${totalSpend.toLocaleString('en-IN')}
+Avg rate     : ₹${avgRate.toFixed(0)}/${unit}
+Purchases    : ${rows.length}
+
+By vendor:
+${vendorLines}`
+      );
+      return;
+    }
+
     // ── full P&L summary ─────────────────────────────────────────────────
     let startDate = today;
     let endDate: string | undefined;

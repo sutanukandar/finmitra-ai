@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, query_ingredient, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -40,6 +40,19 @@ For query_items — user asks for top items/ingredients by spend, optionally fil
 - vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
 - limit: use whatever number user says, default 5
 - date is YYYY-MM-DD, only set when period = "specific_date"
+
+For query_ingredient — user asks about a specific ingredient across vendors:
+- "how much carrot did I buy this month"
+  → {"intent": "query_ingredient", "ingredient": "Carrot", "period": "mtd"}
+- "total curd spend in April"
+  → {"intent": "query_ingredient", "ingredient": "Curd", "period": "specific_month", "month": "2026-04"}
+- "kitna honey kharida is mahine"
+  → {"intent": "query_ingredient", "ingredient": "Honey", "period": "mtd"}
+- "eggs ka total this month"
+  → {"intent": "query_ingredient", "ingredient": "Eggs", "period": "mtd"}
+- ingredient: always Capitalised, generic name (Carrot not fresho carrot)
+- period: "today" | "mtd" | "specific_month"
+- month: "YYYY-MM" — only when period = "specific_month"
 
 For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
   → {"intent": "query_today"} or {"intent": "query_mtd"}
@@ -126,7 +139,10 @@ Return this exact structure:
   "total": numeric total amount in INR,
   "items": [
     {
-      "item_name": "product name",
+      "item_name": "exact product name from invoice",
+      "item_canonical": "generic ingredient name",
+      "unit_normalised": "Kg or L or Pc",
+      "quantity_normalised": numeric quantity in unit_normalised,
       "quantity": numeric quantity,
       "unit": "Kg/Pc/L/etc",
       "rate": numeric per-unit price,
@@ -138,12 +154,23 @@ Return this exact structure:
 Rules:
 - date must be in DD-MM-YYYY format
 - All amounts are numbers only (no ₹ symbol)
-- If a field is unclear, use a sensible default (0 for numbers, empty string for text)`;
+- If a field is unclear, use a sensible default (0 for numbers, empty string for text)
+- item_canonical: the generic ingredient name, stripping brand, size, packaging, adjectives. One or two words max. Capitalised. The ingredient, not the brand.
+  Examples: 'fresho! Carrot - Orange 1 kg' → 'Carrot', 'Amul Curd - Creamy 900g' → 'Curd',
+  'Zomato Hyperpure Eggs 30 Pcs Tray' → 'Eggs', 'VIVI - Honey, 1 Kg' → 'Honey',
+  'Heritage Table Butter 500gm' → 'Butter', 'Bru Instant Coffee 500g' → 'Coffee Powder',
+  'Bolas Independence Almond 250gm' → 'Almonds', 'Cadbury Oreo Vanilla 125g' → 'Biscuits',
+  'Bisleri Drinking Water 24x250ml' → 'Water'
+- unit_normalised: standardise to Kg / L / Pc only.
+  500g → 'Kg' (quantity_normalised: 0.5), 1kg → 'Kg' (quantity_normalised: 1.0),
+  500ml → 'L' (quantity_normalised: 0.5), 1 Tray (30 eggs) → 'Pc' (quantity_normalised: 30),
+  1 Pack → 'Pc' (quantity_normalised: 1)
+- quantity_normalised: the quantity expressed in unit_normalised units`;
 
       console.log('[Parser] Sending to Claude Vision...');
       const aiResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [
           {
             role: 'user',
