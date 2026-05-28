@@ -43,6 +43,32 @@ export async function handlePnlQuery(
       return;
     }
 
+    // ── query_items: top ingredients by spend ────────────────────────────
+    if (parsed?.intent === 'query_items') {
+      const period = parsed.period === 'today' ? 'today' : 'mtd';
+      const startDate = period === 'today' ? today : monthStart;
+      const endDate   = period === 'today' ? undefined : today;
+      const periodLabel = period === 'today' ? 'Today' : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+
+      const items = await dataService.getTopItemsBySpend(restaurantId, startDate, endDate);
+
+      if (items.length === 0) {
+        await sendMessage(from, "No purchase data found for this period yet.");
+        return;
+      }
+
+      const totalSpend = items.reduce((s, i) => s + i.total_spend, 0);
+      const lines = items.map((item, idx) => {
+        const vendorStr = item.vendors.join(' + ');
+        return `${idx + 1}. ${item.item_name} — ₹${item.total_spend.toLocaleString('en-IN')} (${vendorStr}, ${item.times_purchased} purchase${item.times_purchased > 1 ? 's' : ''})`;
+      });
+
+      await sendMessage(from,
+        `🛒 *Top Items by Spend — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal tracked: ₹${totalSpend.toLocaleString('en-IN')}`
+      );
+      return;
+    }
+
     // ── full P&L summary ─────────────────────────────────────────────────
     let startDate = today;
     let endDate: string | undefined;

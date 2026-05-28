@@ -282,6 +282,49 @@ export const dataService = {
     return { newTotal };
   },
 
+  async getTopItemsBySpend(
+    restaurantId: string,
+    startDate: string,
+    endDate?: string
+  ): Promise<Array<{ item_name: string; vendors: string[]; total_spend: number; total_qty: number; times_purchased: number }>> {
+    let query = supabase
+      .from('invoice_items')
+      .select('item_name, vendor, amount, quantity')
+      .eq('restaurant_id', restaurantId)
+      .gte('date', startDate);
+
+    if (endDate) query = query.lte('date', endDate);
+
+    const { data, error } = await query;
+    if (error || !data) {
+      console.error("[dataService] getTopItemsBySpend failed:", error);
+      return [];
+    }
+
+    // Group by item_name in JS, merging across vendors
+    const map = new Map<string, { vendors: Set<string>; total_spend: number; total_qty: number; times_purchased: number }>();
+    for (const row of data as any[]) {
+      const key = (row.item_name || 'Unknown').trim();
+      const existing = map.get(key) || { vendors: new Set<string>(), total_spend: 0, total_qty: 0, times_purchased: 0 };
+      existing.vendors.add(row.vendor || 'Unknown');
+      existing.total_spend += Number(row.amount || 0);
+      existing.total_qty   += Number(row.quantity || 0);
+      existing.times_purchased += 1;
+      map.set(key, existing);
+    }
+
+    return Array.from(map.entries())
+      .map(([item_name, v]) => ({
+        item_name,
+        vendors: Array.from(v.vendors),
+        total_spend: v.total_spend,
+        total_qty: v.total_qty,
+        times_purchased: v.times_purchased
+      }))
+      .sort((a, b) => b.total_spend - a.total_spend)
+      .slice(0, 8);
+  },
+
   async writeAuditLog(
     restaurantId: string,
     data: {

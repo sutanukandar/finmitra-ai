@@ -3,7 +3,7 @@
 // =============================================
 
 export interface ParsedIntent {
-  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'help' | 'unknown';
+  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_items' | 'help' | 'unknown';
   entries?: Array<{
     category: string;
     amount: number;

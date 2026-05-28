@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -26,6 +26,11 @@ For query_specific — user asks for ONE metric, not full P&L:
   → {"intent": "query_specific", "metric": "cogs", "period": "today" or "mtd"}
 - period is "today" unless the message mentions month / mahina / MTD
 - Use query_specific only when asking for a single number, NOT full P&L
+
+For query_items — user asks for top items/ingredients by spend:
+- "top items bought this month", "item wise breakdown", "kya kya kharida is mahine", "most expensive items", "give items on which expenses were made"
+  → {"intent": "query_items", "period": "today" or "mtd"}
+- period is "mtd" unless explicitly asking about today
 
 For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
   → {"intent": "query_today"} or {"intent": "query_mtd"}
