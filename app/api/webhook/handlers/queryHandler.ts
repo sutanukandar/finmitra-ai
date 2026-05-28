@@ -1,5 +1,11 @@
+import { createClient } from '@supabase/supabase-js';
 import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function handlePnlQuery(
   from: string,
@@ -45,26 +51,66 @@ export async function handlePnlQuery(
 
     // ── query_items: top ingredients by spend ────────────────────────────
     if (parsed?.intent === 'query_items') {
-      const period = parsed.period === 'today' ? 'today' : 'mtd';
-      const startDate = period === 'today' ? today : monthStart;
-      const endDate   = period === 'today' ? undefined : today;
-      const periodLabel = period === 'today' ? 'Today' : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      let startDate: string, endDate: string;
+      if (parsed.period === 'specific_date' && parsed.date) {
+        startDate = parsed.date;
+        endDate   = parsed.date;
+      } else if (parsed.period === 'today') {
+        startDate = today;
+        endDate   = today;
+      } else {
+        startDate = monthStart;
+        endDate   = today;
+      }
 
-      const items = await dataService.getTopItemsBySpend(restaurantId, startDate, endDate);
+      const limit = parsed.limit || 5;
 
-      if (items.length === 0) {
-        await sendMessage(from, "No purchase data found for this period yet.");
+      let query = supabase
+        .from('invoice_items')
+        .select('item_name, vendor, quantity, unit, rate, amount')
+        .eq('restaurant_id', restaurantId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('amount', { ascending: false });
+
+      if (parsed.vendor_filter) {
+        const vendorKeyword: Record<string, string> = {
+          hyperpure: 'Hyperpure',
+          bigbasket: 'BigBasket',
+          dmart: 'DMart'
+        };
+        const kw = vendorKeyword[parsed.vendor_filter];
+        if (kw) query = query.ilike('vendor', `%${kw}%`);
+      }
+
+      const { data: items } = await query.limit(limit);
+
+      if (!items || items.length === 0) {
+        await sendMessage(from, "No item-level data found for this period.");
         return;
       }
 
-      const totalSpend = items.reduce((s, i) => s + i.total_spend, 0);
-      const lines = items.map((item, idx) => {
-        const vendorStr = item.vendors.join(' + ');
-        return `${idx + 1}. ${item.item_name} — ₹${item.total_spend.toLocaleString('en-IN')} (${vendorStr}, ${item.times_purchased} purchase${item.times_purchased > 1 ? 's' : ''})`;
+      const periodLabel = parsed.period === 'specific_date' && parsed.date
+        ? new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN',
+            { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+        : parsed.period === 'today'
+        ? 'Today'
+        : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+
+      const vendorLabel = parsed.vendor_filter
+        ? ` (${parsed.vendor_filter.charAt(0).toUpperCase() + parsed.vendor_filter.slice(1)})`
+        : '';
+
+      const total = (items as any[]).reduce((sum, i) => sum + Number(i.amount), 0);
+      const lines = (items as any[]).map((item, idx) => {
+        const qty  = Number(item.quantity);
+        const rate = Number(item.rate);
+        const amt  = Number(item.amount);
+        return `${idx + 1}. ${item.item_name} — ₹${amt.toLocaleString('en-IN')} (${qty} ${item.unit || 'pc'} @ ₹${rate})`;
       });
 
       await sendMessage(from,
-        `🛒 *Top Items by Spend — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal tracked: ₹${totalSpend.toLocaleString('en-IN')}`
+        `🛒 *Top Items by Spend — ${periodLabel}${vendorLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`
       );
       return;
     }

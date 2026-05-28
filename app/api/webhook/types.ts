@@ -9,8 +9,11 @@ export interface ParsedIntent {
     amount: number;
     date_offset?: number;
   }>;
-  metric?: string;  // for query_specific: 'sales' | 'cogs'
-  period?: string;  // for query_specific: 'today' | 'mtd'
+  metric?: string;         // for query_specific: 'sales' | 'cogs'
+  period?: string;         // 'today' | 'mtd' | 'specific_date'
+  date?: string;           // for query_items specific_date: YYYY-MM-DD
+  vendor_filter?: string | null;  // for query_items: 'hyperpure' | 'bigbasket' | 'dmart' | null
+  limit?: number;          // for query_items: default 5
 }
 
 export interface PnlEntryData {

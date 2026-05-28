@@ -27,10 +27,19 @@ For query_specific — user asks for ONE metric, not full P&L:
 - period is "today" unless the message mentions month / mahina / MTD
 - Use query_specific only when asking for a single number, NOT full P&L
 
-For query_items — user asks for top items/ingredients by spend:
-- "top items bought this month", "item wise breakdown", "kya kya kharida is mahine", "most expensive items", "give items on which expenses were made"
-  → {"intent": "query_items", "period": "today" or "mtd"}
-- period is "mtd" unless explicitly asking about today
+For query_items — user asks for top items/ingredients by spend, optionally filtered by vendor and/or date:
+- "most expensive items this month"
+  → {"intent": "query_items", "period": "mtd", "vendor_filter": null, "limit": 5}
+- "top 5 items bought from Hyperpure on 27 April"
+  → {"intent": "query_items", "period": "specific_date", "date": "2026-04-27", "vendor_filter": "hyperpure", "limit": 5}
+- "what did I buy from BigBasket in May?"
+  → {"intent": "query_items", "period": "mtd", "vendor_filter": "bigbasket", "limit": 8}
+- "top items this month"
+  → {"intent": "query_items", "period": "mtd", "vendor_filter": null, "limit": 5}
+- period defaults to "mtd" unless user explicitly asks about today
+- vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
+- limit: use whatever number user says, default 5
+- date is YYYY-MM-DD, only set when period = "specific_date"
 
 For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
   → {"intent": "query_today"} or {"intent": "query_mtd"}
