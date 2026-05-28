@@ -43,8 +43,8 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           restaurantId, pnlColumn, finalDate, entry.amount || 0
         );
 
-        if (dupCheck.isDuplicate) {
-          console.log(`[TextHandler] Duplicate detected: ${pnlColumn} ₹${entry.amount} on ${finalDate}`);
+        if (dupCheck.isDuplicate || dupCheck.csvExists) {
+          console.log(`[TextHandler] Duplicate detected: ${pnlColumn} ₹${entry.amount} on ${finalDate} (csvExists=${dupCheck.csvExists})`);
 
           const existing  = dupCheck.existingAmount || 0;
           const newAmount = entry.amount || 0;
@@ -56,16 +56,25 @@ export async function handleTextMessage(from: string, restaurantId: string, body
             'confirm_text_entry'
           );
 
-          await sendMessage(from,
-`⚠️ Possible Duplicate Entry
+          const warnMsg = dupCheck.csvExists
+            ? `⚠️ CSV Already Uploaded for This Date
+
+You uploaded a PhonePe CSV for ${dateLabel} which already has ₹${existing.toLocaleString('en-IN')} recorded.
+
+Adding ₹${newAmount.toLocaleString('en-IN')} manually will make the total ₹${(existing + newAmount).toLocaleString('en-IN')}.
+
+Only save if this is an additional payment NOT in your CSV.
+Reply *haan* to add anyway · *nahi* to cancel`
+            : `⚠️ Possible Duplicate Entry
 
 ${pnlColumn} ₹${newAmount} for ${dateLabel}
 
 You already have ${pnlColumn} ₹${existing} saved for this date.
 Saving again will add ₹${newAmount} more (total = ₹${existing + newAmount})
 
-Reply *haan* to save anyway · *nahi* to cancel`
-          );
+Reply *haan* to save anyway · *nahi* to cancel`;
+
+          await sendMessage(from, warnMsg);
 
           // Stop processing further entries in this message
           break;

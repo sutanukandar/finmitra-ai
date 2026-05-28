@@ -175,27 +175,31 @@ export const dataService = {
     category: string,
     date: string,
     amount: number
-  ): Promise<{ isDuplicate: boolean; existingAmount?: number; enteredAt?: string }> {
+  ): Promise<{ isDuplicate: boolean; existingAmount?: number; enteredAt?: string; csvExists: boolean }> {
     const { data } = await supabase
       .from('pnl_entries')
-      .select(`${category}, updated_at`)
+      .select(`${category}, updated_at, metadata`)
       .eq('restaurant_id', restaurantId)
       .eq('date', date)
       .maybeSingle();
 
-    if (!data) return { isDuplicate: false };
+    if (!data) return { isDuplicate: false, csvExists: false };
 
     const row = data as any;
     const existingAmount = row[category] !== null && row[category] !== undefined
       ? Number(row[category])
       : null;
 
-    if (existingAmount === null) return { isDuplicate: false };
+    const meta = (row.metadata || {}) as Record<string, string[]>;
+    const csvExists = (meta[`${category}_sources`] || []).includes('csv');
+
+    if (existingAmount === null) return { isDuplicate: false, csvExists };
 
     return {
       isDuplicate: existingAmount === amount,
       existingAmount,
-      enteredAt: row.updated_at
+      enteredAt: row.updated_at,
+      csvExists,
     };
   },
 
@@ -274,11 +278,12 @@ export const dataService = {
     restaurantId: string,
     category: string,
     date: string,
-    amount: number
+    amount: number,
+    source: 'whatsapp' | 'csv' | 'backfill' = 'whatsapp'
   ): Promise<{ newTotal: number }> {
     const { data } = await supabase
       .from('pnl_entries')
-      .select(category)
+      .select(`${category}, metadata`)
       .eq('restaurant_id', restaurantId)
       .eq('date', date)
       .maybeSingle();
@@ -297,7 +302,22 @@ export const dataService = {
       console.error("[dataService] accumulatePnlEntry failed:", error);
       throw error;
     }
-    console.log(`[dataService] Accumulated ${category}: ${existing} + ${amount} = ${newTotal} for ${date}`);
+    console.log(`[dataService] Accumulated ${category}: ${existing} + ${amount} = ${newTotal} for ${date} (source: ${source})`);
+
+    // Update source tracking in metadata
+    const meta = ((data as any)?.metadata || {}) as Record<string, string[]>;
+    const sourceKey = `${category}_sources`;
+    const sources = meta[sourceKey] || [];
+    if (!sources.includes(source)) {
+      sources.push(source);
+      meta[sourceKey] = sources;
+      await supabase
+        .from('pnl_entries')
+        .update({ metadata: meta })
+        .eq('restaurant_id', restaurantId)
+        .eq('date', date);
+    }
+
     return { newTotal };
   },
 
