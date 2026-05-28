@@ -67,7 +67,7 @@ export default function BackfillPage() {
   const [pageState, setPageState] = useState<PageState>('idle');
   const [rows, setRows]           = useState<BillRow[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0, currentFile: '' });
   const [saveProgress,  setSaveProgress]  = useState({ current: 0, total: 0 });
   const [doneSummary, setDoneSummary] = useState<{
     billsSaved: number; itemsSaved: number; totalAmount: number;
@@ -99,12 +99,16 @@ export default function BackfillPage() {
     if (rows.length === 0) return;
     const snapshot = [...rows];
     setPageState('parsing');
-    setParseProgress({ current: 0, total: snapshot.length });
-    setRows(prev => prev.map(r => ({ ...r, status: 'parsing' })));
+    setParseProgress({ current: 0, total: snapshot.length, currentFile: '' });
 
     let completed = 0;
 
-    await Promise.allSettled(snapshot.map(async (row) => {
+    for (const row of snapshot) {
+      setRows(prev => prev.map(r =>
+        r.id === row.id ? { ...r, status: 'parsing' } : r
+      ));
+      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name });
+
       const fd = new FormData();
       fd.append('file', row.file);
       fd.append('restaurantId', RESTAURANT_ID);
@@ -129,8 +133,13 @@ export default function BackfillPage() {
       }
 
       completed++;
-      setParseProgress({ current: completed, total: snapshot.length });
-    }));
+      setParseProgress({ current: completed, total: snapshot.length, currentFile: row.file.name });
+
+      // 2-second delay between files to avoid Claude rate limits
+      if (completed < snapshot.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
 
     setPageState('review');
   };
@@ -303,7 +312,7 @@ export default function BackfillPage() {
               <div className="space-y-5">
                 <div className="bg-white rounded-xl border p-6 space-y-3">
                   <p className="text-sm font-medium text-gray-600">
-                    Parsing {parseProgress.current} of {parseProgress.total}…
+                    Parsing {parseProgress.currentFile || '…'} ({parseProgress.current} of {parseProgress.total})
                   </p>
                   <div className="w-full bg-gray-100 rounded-full h-2.5">
                     <div
