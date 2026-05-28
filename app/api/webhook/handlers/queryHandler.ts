@@ -19,9 +19,21 @@ export async function handlePnlQuery(
 
     // ── query_specific: single-metric answer ─────────────────────────────
     if (parsed?.intent === 'query_specific') {
-      const period = parsed.period === 'mtd' ? 'mtd' : 'today';
-      const startDate = period === 'mtd' ? monthStart : today;
-      const endDate   = period === 'mtd' ? today : undefined;
+      let startDate: string, endDate: string | undefined;
+      if (parsed.period === 'specific_month' && parsed.month) {
+        startDate = parsed.month + '-01';
+        endDate   = parsed.month + '-' + new Date(
+          parseInt(parsed.month.split('-')[0]),
+          parseInt(parsed.month.split('-')[1]),
+          0
+        ).getDate().toString().padStart(2, '0');
+      } else if (parsed.period === 'mtd') {
+        startDate = monthStart;
+        endDate   = today;
+      } else {
+        startDate = today;
+        endDate   = undefined;
+      }
 
       const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
 
@@ -40,8 +52,10 @@ export async function handlePnlQuery(
         }
       });
 
-      const label  = parsed.metric === 'sales' ? 'Sales' : 'Expenses';
-      const period_label = period === 'mtd'
+      const label        = parsed.metric === 'sales' ? 'Sales' : 'Expenses';
+      const period_label = parsed.period === 'specific_month' && parsed.month
+        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+        : parsed.period === 'mtd'
         ? `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`
         : 'Today';
 
@@ -55,6 +69,13 @@ export async function handlePnlQuery(
       if (parsed.period === 'specific_date' && parsed.date) {
         startDate = parsed.date;
         endDate   = parsed.date;
+      } else if (parsed.period === 'specific_month' && parsed.month) {
+        startDate = parsed.month + '-01';
+        endDate   = new Date(
+          parseInt(parsed.month.split('-')[0]),
+          parseInt(parsed.month.split('-')[1]),
+          0
+        ).toISOString().split('T')[0];
       } else if (parsed.period === 'today') {
         startDate = today;
         endDate   = today;
@@ -94,6 +115,8 @@ export async function handlePnlQuery(
       const periodLabel = parsed.period === 'specific_date' && parsed.date
         ? new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN',
             { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+        : parsed.period === 'specific_month' && parsed.month
+        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
         : parsed.period === 'today'
         ? 'Today'
         : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;

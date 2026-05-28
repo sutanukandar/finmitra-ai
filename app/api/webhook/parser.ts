@@ -24,7 +24,12 @@ For query_specific — user asks for ONE metric, not full P&L:
   → {"intent": "query_specific", "metric": "sales", "period": "today" or "mtd"}
 - "aaj kitna kharch hua", "today ka expense", "is mahine ka kharch"
   → {"intent": "query_specific", "metric": "cogs", "period": "today" or "mtd"}
-- period is "today" unless the message mentions month / mahina / MTD
+- "Total Expenses for Mar 2026", "March ka total kharch"
+  → {"intent": "query_specific", "metric": "cogs", "period": "specific_month", "month": "2026-03"}
+- "March 2026 sales", "Mar 26 sales"
+  → {"intent": "query_specific", "metric": "sales", "period": "specific_month", "month": "2026-03"}
+- period is "today" unless the message mentions a specific month or MTD
+- For a named month + year → period: "specific_month", month: "YYYY-MM"
 - Use query_specific only when asking for a single number, NOT full P&L
 
 For query_items — user asks for top items/ingredients by spend, optionally filtered by vendor and/or date:
@@ -39,8 +44,13 @@ For query_items — user asks for top items/ingredients by spend, optionally fil
 - period defaults to "mtd" unless user explicitly asks about today
 - vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
 - limit: use whatever number user says, default 5
-- date is YYYY-MM-DD, only set when period = "specific_date"
 - sort_by: "value" (default) | "weight" — "top 5 by value" → "value", "top 5 by weight" → "weight"
+- IMPORTANT — month name vs full date:
+  "Mar 26", "March 26", "March 2026" = a MONTH → period: "specific_month", month: "YYYY-MM"
+  "27 April", "5th March", "April 27" = a full DATE → period: "specific_date", date: "YYYY-MM-DD"
+- "top 5 items in Mar 26" → {"intent":"query_items","period":"specific_month","month":"2026-03","vendor_filter":null,"sort_by":"value","limit":5}
+- "top items bought in March 2026" → {"intent":"query_items","period":"specific_month","month":"2026-03","vendor_filter":null,"sort_by":"value","limit":5}
+- "top 5 items on 27 April" → {"intent":"query_items","period":"specific_date","date":"2026-04-27","vendor_filter":null,"sort_by":"value","limit":5}
 
 For query_ingredient — user asks about a specific ingredient across vendors:
 - "how much carrot did I buy this month"
