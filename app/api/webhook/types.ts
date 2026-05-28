@@ -14,6 +14,7 @@ export interface ParsedIntent {
   date?: string;           // for query_items specific_date: YYYY-MM-DD
   vendor_filter?: string | null;  // for query_items: 'hyperpure' | 'bigbasket' | 'dmart' | null
   limit?: number;          // for query_items: default 5
+  sort_by?: string;        // for query_items: 'value' | 'weight', default 'value'
   ingredient?: string;     // for query_ingredient: e.g. "Carrot"
   month?: string;          // for query_ingredient specific_month: YYYY-MM
 }

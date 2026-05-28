@@ -63,15 +63,16 @@ export async function handlePnlQuery(
         endDate   = today;
       }
 
-      const limit = parsed.limit || 5;
+      const limit      = parsed.limit || 5;
+      const sortColumn = parsed.sort_by === 'weight' ? 'quantity_normalised' : 'amount';
 
       let query = supabase
         .from('invoice_items')
-        .select('item_name, vendor, quantity, unit, rate, amount')
+        .select('item_name, item_canonical, vendor, quantity, unit, quantity_normalised, unit_normalised, rate, amount, date')
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate)
-        .order('amount', { ascending: false });
+        .order(sortColumn, { ascending: false });
 
       if (parsed.vendor_filter) {
         const vendorKeyword: Record<string, string> = {
@@ -101,16 +102,21 @@ export async function handlePnlQuery(
         ? ` (${parsed.vendor_filter.charAt(0).toUpperCase() + parsed.vendor_filter.slice(1)})`
         : '';
 
+      const sortLabel = parsed.sort_by === 'weight' ? 'by Weight' : 'by Value';
+
       const total = (items as any[]).reduce((sum, i) => sum + Number(i.amount), 0);
       const lines = (items as any[]).map((item, idx) => {
-        const qty  = Number(item.quantity);
-        const rate = Number(item.rate);
-        const amt  = Number(item.amount);
-        return `${idx + 1}. ${item.item_name} — ₹${amt.toLocaleString('en-IN')} (${qty} ${item.unit || 'pc'} @ ₹${rate})`;
+        const r           = item as any;
+        const displayName = r.item_canonical || r.item_name;
+        const qty         = r.quantity_normalised ? Number(r.quantity_normalised) : Number(r.quantity);
+        const unit        = r.unit_normalised || r.unit || 'pc';
+        const amt         = Number(r.amount);
+        const ratePerUnit = qty > 0 ? (amt / qty).toFixed(0) : Number(r.rate).toFixed(0);
+        return `${idx + 1}. ${displayName} — ₹${amt.toLocaleString('en-IN')} (${qty.toFixed(2)} ${unit} @ ₹${ratePerUnit}/${unit})`;
       });
 
       await sendMessage(from,
-        `🛒 *Top Items by Spend — ${periodLabel}${vendorLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`
+        `🛒 *Top Items ${sortLabel} — ${periodLabel}${vendorLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`
       );
       return;
     }

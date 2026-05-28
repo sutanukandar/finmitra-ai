@@ -40,6 +40,7 @@ For query_items — user asks for top items/ingredients by spend, optionally fil
 - vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
 - limit: use whatever number user says, default 5
 - date is YYYY-MM-DD, only set when period = "specific_date"
+- sort_by: "value" (default) | "weight" — "top 5 by value" → "value", "top 5 by weight" → "weight"
 
 For query_ingredient — user asks about a specific ingredient across vendors:
 - "how much carrot did I buy this month"
