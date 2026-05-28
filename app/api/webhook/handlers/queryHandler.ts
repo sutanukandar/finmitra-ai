@@ -67,79 +67,85 @@ export async function handlePnlQuery(
     if (parsed?.intent === 'query_items') {
       let startDate: string, endDate: string;
       if (parsed.period === 'specific_date' && parsed.date) {
-        startDate = parsed.date;
-        endDate   = parsed.date;
+        startDate = parsed.date; endDate = parsed.date;
       } else if (parsed.period === 'specific_month' && parsed.month) {
+        const [y, m] = parsed.month.split('-').map(Number);
         startDate = parsed.month + '-01';
-        endDate   = new Date(
-          parseInt(parsed.month.split('-')[0]),
-          parseInt(parsed.month.split('-')[1]),
-          0
-        ).toISOString().split('T')[0];
+        endDate   = new Date(y, m, 0).toISOString().split('T')[0];
       } else if (parsed.period === 'today') {
-        startDate = today;
-        endDate   = today;
+        startDate = today; endDate = today;
       } else {
-        startDate = monthStart;
-        endDate   = today;
+        startDate = monthStart; endDate = today;
       }
 
-      const limit      = parsed.limit || 5;
-      const sortColumn = parsed.sort_by === 'weight' ? 'quantity_normalised' : 'amount';
+      const limit = parsed.limit || 5;
 
-      let query = supabase
+      const { data: items } = await supabase
         .from('invoice_items')
-        .select('item_name, item_canonical, vendor, quantity, unit, quantity_normalised, unit_normalised, rate, amount, date')
+        .select('item_canonical, unit_normalised, quantity_normalised, amount, vendor')
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate)
-        .order(sortColumn, { ascending: false });
-
-      if (parsed.vendor_filter) {
-        const vendorKeyword: Record<string, string> = {
-          hyperpure: 'Hyperpure',
-          bigbasket: 'BigBasket',
-          dmart: 'DMart'
-        };
-        const kw = vendorKeyword[parsed.vendor_filter];
-        if (kw) query = query.ilike('vendor', `%${kw}%`);
-      }
-
-      const { data: items } = await query.limit(limit);
+        .not('item_canonical', 'is', null)
+        .not('item_canonical', 'ilike', '%delivery%')
+        .not('item_canonical', 'ilike', '%small order%');
 
       if (!items || items.length === 0) {
-        await sendMessage(from, "No item-level data found for this period.");
+        await sendMessage(from, 'No item-level data found for this period.');
         return;
       }
 
-      const periodLabel = parsed.period === 'specific_date' && parsed.date
-        ? new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN',
-            { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
-        : parsed.period === 'specific_month' && parsed.month
-        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
-        : parsed.period === 'today'
-        ? 'Today'
-        : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      // Apply vendor filter in JS
+      const filtered = parsed.vendor_filter
+        ? (items as any[]).filter((r: any) =>
+            (r.vendor || '').toLowerCase().includes(parsed.vendor_filter))
+        : (items as any[]);
 
+      // Aggregate by item_canonical
+      const grouped: Record<string, { qty: number; unit: string; spend: number }> = {};
+      filtered.forEach((r: any) => {
+        const key = r.item_canonical as string;
+        if (!grouped[key]) grouped[key] = { qty: 0, unit: r.unit_normalised || 'Pc', spend: 0 };
+        grouped[key].qty   += Number(r.quantity_normalised || 0);
+        grouped[key].spend += Number(r.amount || 0);
+      });
+
+      const sortKey = parsed.sort_by === 'weight' ? 'qty' : 'spend';
+      const sorted  = Object.entries(grouped)
+        .sort((a, b) => b[1][sortKey] - a[1][sortKey])
+        .slice(0, limit);
+
+      if (sorted.length === 0) {
+        await sendMessage(from, 'No item-level data found for this period.');
+        return;
+      }
+
+      const grandTotal  = sorted.reduce((s, [, d]) => s + d.spend, 0);
+      const sortLabel   = parsed.sort_by === 'weight' ? 'by Weight' : 'by Value';
       const vendorLabel = parsed.vendor_filter
         ? ` (${parsed.vendor_filter.charAt(0).toUpperCase() + parsed.vendor_filter.slice(1)})`
         : '';
 
-      const sortLabel = parsed.sort_by === 'weight' ? 'by Weight' : 'by Value';
+      let periodLabel: string;
+      if (parsed.period === 'specific_date' && parsed.date) {
+        periodLabel = new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN',
+          { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+      } else if (parsed.period === 'specific_month' && parsed.month) {
+        periodLabel = new Date(parsed.month + '-01').toLocaleString('en-IN',
+          { month: 'long', year: 'numeric' });
+      } else if (parsed.period === 'today') {
+        periodLabel = 'Today';
+      } else {
+        periodLabel = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      }
 
-      const total = (items as any[]).reduce((sum, i) => sum + Number(i.amount), 0);
-      const lines = (items as any[]).map((item, idx) => {
-        const r           = item as any;
-        const displayName = r.item_canonical || r.item_name;
-        const qty         = r.quantity_normalised ? Number(r.quantity_normalised) : Number(r.quantity);
-        const unit        = r.unit_normalised || r.unit || 'pc';
-        const amt         = Number(r.amount);
-        const qtyDisplay  = qty > 0 ? ` (${qty.toFixed(2)} ${unit})` : '';
-        return `${idx + 1}. ${displayName} — ₹${amt.toLocaleString('en-IN')}${qtyDisplay}`;
+      const lines = sorted.map(([name, d], idx) => {
+        const qtyDisplay = d.qty > 0 ? ` (${d.qty.toFixed(2)} ${d.unit})` : '';
+        return `${idx + 1}. ${name} — ₹${d.spend.toLocaleString('en-IN')}${qtyDisplay}`;
       });
 
       await sendMessage(from,
-        `🛒 *Top Items ${sortLabel} — ${periodLabel}${vendorLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`
+        `🛒 *Top Items ${sortLabel} — ${periodLabel}${vendorLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`
       );
       return;
     }
