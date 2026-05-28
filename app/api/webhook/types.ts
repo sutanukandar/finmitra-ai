@@ -3,12 +3,14 @@
 // =============================================
 
 export interface ParsedIntent {
-  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'help' | 'unknown';
+  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'help' | 'unknown';
   entries?: Array<{
     category: string;
     amount: number;
     date_offset?: number;
   }>;
+  metric?: string;  // for query_specific: 'sales' | 'cogs'
+  period?: string;  // for query_specific: 'today' | 'mtd'
 }
 
 export interface PnlEntryData {

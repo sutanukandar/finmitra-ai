@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -19,8 +19,21 @@ Categories for add_entries:
 
 If the message is about sales/revenue, use category: "sales".
 
-Example output:
-{"intent": "add_entries", "entries": [{"category": "sales", "amount": 3500, "date_offset": 0}]}`;
+For query_specific — user asks for ONE metric, not full P&L:
+- "aaj kitna bika", "today ka sale", "how much is today sales", "is mahine ka sale"
+  → {"intent": "query_specific", "metric": "sales", "period": "today" or "mtd"}
+- "aaj kitna kharch hua", "today ka expense", "is mahine ka kharch"
+  → {"intent": "query_specific", "metric": "cogs", "period": "today" or "mtd"}
+- period is "today" unless the message mentions month / mahina / MTD
+- Use query_specific only when asking for a single number, NOT full P&L
+
+For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
+  → {"intent": "query_today"} or {"intent": "query_mtd"}
+
+Example outputs:
+{"intent": "add_entries", "entries": [{"category": "sales", "amount": 3500, "date_offset": 0}]}
+{"intent": "query_specific", "metric": "sales", "period": "today"}
+{"intent": "query_today"}`;
 
     try {
       const aiResponse = await anthropic.messages.create({

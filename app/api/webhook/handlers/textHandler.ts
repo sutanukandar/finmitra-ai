@@ -83,8 +83,11 @@ Reply *haan* to save anyway · *nahi* to cancel`
         await sendMessage(from, `✅ ${savedCount} entries saved successfully!`);
       }
     } 
-    else if (parsed.intent === "query_today" || parsed.intent === "query_mtd" || parsed.intent === "query_lastmonth") {
-      await handlePnlQuery(from, restaurantId, body);
+    else if (
+      parsed.intent === "query_today" || parsed.intent === "query_mtd" ||
+      parsed.intent === "query_lastmonth" || parsed.intent === "query_specific"
+    ) {
+      await handlePnlQuery(from, restaurantId, body, parsed);
     } 
     else {
       await sendMessage(from, "✅ Got it!\nTry:\n• today sales 3500\n• aaj sales 4200\n• aaj ka P&L");
