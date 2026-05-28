@@ -94,7 +94,7 @@ Reply *haan* to save anyway · *nahi* to cancel`;
     } 
     else if (
       ['query_today','query_mtd','query_lastmonth',
-       'query_specific','query_items','query_ingredient',
+       'query_specific','query_pnl','query_items','query_ingredient',
        'query_vendor_breakdown'].includes(parsed.intent)
     ) {
       await handlePnlQuery(from, restaurantId, body, parsed);

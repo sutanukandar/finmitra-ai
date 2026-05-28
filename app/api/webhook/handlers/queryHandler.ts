@@ -282,20 +282,33 @@ ${vendorLines}`
       return;
     }
 
-    // ── full P&L summary ─────────────────────────────────────────────────
+    // ── full P&L summary (query_today / query_mtd / query_pnl) ──────────
     let startDate = today;
     let endDate: string | undefined;
+    let periodLabel = 'Today';
 
-    if (body.includes('aaj') || body.includes('today') || body.includes('p&l')) {
-      startDate = today;
+    if (parsed?.intent === 'query_pnl' && parsed.period === 'specific_month' && parsed.month) {
+      const [y, m] = parsed.month.split('-').map(Number);
+      startDate   = `${parsed.month}-01`;
+      endDate     = new Date(y, m, 0).toISOString().split('T')[0];
+      periodLabel = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+    } else if (parsed?.intent === 'query_pnl' && parsed.period === 'yesterday') {
+      startDate   = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      periodLabel = 'Yesterday';
+    } else if (parsed?.intent === 'query_mtd' || parsed?.intent === 'query_pnl' && parsed.period === 'mtd' ||
+               body.includes('this month') || body.includes('month')) {
+      startDate   = monthStart;
+      endDate     = today;
+      periodLabel = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
     } else if (body.includes('kal') || body.includes('yesterday')) {
-      startDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    } else if (body.includes('this month') || body.includes('month') ||
-               parsed?.intent === 'query_mtd') {
-      startDate = monthStart;
-      endDate   = today;
+      startDate   = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      periodLabel = 'Yesterday';
+    } else if (body.includes('aaj') || body.includes('today') || body.includes('p&l') ||
+               parsed?.intent === 'query_today' || parsed?.intent === 'query_pnl') {
+      startDate   = today;
+      periodLabel = 'Today';
     } else {
-      await sendMessage(from, "Please specify period like `aaj ka P&L`, `this month`, or `kal ka P&L`");
+      await sendMessage(from, "Please specify period like `aaj ka P&L`, `this month`, or `P&L for Mar 2026`");
       return;
     }
 
@@ -306,30 +319,70 @@ ${vendorLines}`
       return;
     }
 
-    let revenue = 0, cogs = 0, fixed = 0;
+    let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
+    let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, other = 0;
+    let rent = 0, salary = 0, electricity = 0, gas = 0, fixedAmt = 0;
 
     entries.forEach((e: any) => {
-      revenue += (e.sales || 0) + (e.swiggy || 0) + (e.zomato || 0) + (e.phonepe || 0);
-      cogs    += (e.hyperpure || 0) + (e.bigbasket || 0) + (e.milk || 0) +
-                 (e.bread || 0) + (e.other || 0);
-      fixed   += (e.rent || 0) + (e.electricity || 0) + (e.gas || 0) +
-                 (e.salary || 0) + (e.fixed || 0);
+      sales      += e.sales      || 0;
+      swiggy     += e.swiggy     || 0;
+      zomato     += e.zomato     || 0;
+      phonepe    += e.phonepe    || 0;
+      hyperpure  += e.hyperpure  || 0;
+      bigbasket  += e.bigbasket  || 0;
+      milk       += e.milk       || 0;
+      bread      += e.bread      || 0;
+      other      += e.other      || 0;
+      rent       += e.rent       || 0;
+      salary     += e.salary     || 0;
+      electricity+= e.electricity|| 0;
+      gas        += e.gas        || 0;
+      fixedAmt   += e.fixed      || 0;
     });
 
+    const revenue    = sales + swiggy + zomato + phonepe;
+    const cogs       = hyperpure + bigbasket + milk + bread + other;
+    const fixedTotal = rent + salary + electricity + gas + fixedAmt;
     const grossProfit = revenue - cogs;
-    const netProfit   = grossProfit - fixed;
-    const margin      = revenue > 0 ? Math.round((grossProfit / revenue) * 100) : 0;
-    const periodLabel = endDate ? 'This Month' : body.includes('kal') ? 'Yesterday' : 'Today';
+    const netProfit   = grossProfit - fixedTotal;
 
-    await sendMessage(from, `📊 *P&L Summary*
+    // Only show line items that have a non-zero value
+    const revLines: string[] = [];
+    if (phonepe)  revLines.push(`PhonePe    : ₹${phonepe.toLocaleString('en-IN')}`);
+    if (swiggy)   revLines.push(`Swiggy     : ₹${swiggy.toLocaleString('en-IN')}`);
+    if (zomato)   revLines.push(`Zomato     : ₹${zomato.toLocaleString('en-IN')}`);
+    if (sales)    revLines.push(`Sales      : ₹${sales.toLocaleString('en-IN')}`);
 
-Revenue     : ₹${revenue.toLocaleString('en-IN')}
-COGS        : ₹${cogs.toLocaleString('en-IN')}
-Gross Profit: ₹${grossProfit.toLocaleString('en-IN')} (${margin}%)
-Fixed Cost  : ₹${fixed.toLocaleString('en-IN')}
-Net Profit  : ₹${netProfit.toLocaleString('en-IN')}
+    const cogsLines: string[] = [];
+    if (hyperpure) cogsLines.push(`Hyperpure  : ₹${hyperpure.toLocaleString('en-IN')}`);
+    if (bigbasket) cogsLines.push(`BigBasket  : ₹${bigbasket.toLocaleString('en-IN')}`);
+    if (milk)      cogsLines.push(`Milk       : ₹${milk.toLocaleString('en-IN')}`);
+    if (bread)     cogsLines.push(`Bread      : ₹${bread.toLocaleString('en-IN')}`);
+    if (other)     cogsLines.push(`Other      : ₹${other.toLocaleString('en-IN')}`);
 
-Period: ${periodLabel}`);
+    const fixedLines: string[] = [];
+    if (rent)        fixedLines.push(`Rent       : ₹${rent.toLocaleString('en-IN')}`);
+    if (salary)      fixedLines.push(`Salary     : ₹${salary.toLocaleString('en-IN')}`);
+    if (electricity) fixedLines.push(`Electricity: ₹${electricity.toLocaleString('en-IN')}`);
+    if (gas)         fixedLines.push(`Gas        : ₹${gas.toLocaleString('en-IN')}`);
+    if (fixedAmt)    fixedLines.push(`Fixed      : ₹${fixedAmt.toLocaleString('en-IN')}`);
+
+    const replyParts: string[] = [`📊 *P&L Summary — ${periodLabel}*`];
+
+    replyParts.push(
+      `\n💰 *Revenue*\n${revLines.length ? revLines.join('\n') : '(none)'}\n*Total     : ₹${revenue.toLocaleString('en-IN')}*`
+    );
+    replyParts.push(
+      `\n🛒 *COGS*\n${cogsLines.length ? cogsLines.join('\n') : '(none)'}\n*Total     : ₹${cogs.toLocaleString('en-IN')}*`
+    );
+    replyParts.push(
+      `\n🏢 *Fixed Costs*\n${fixedLines.length ? fixedLines.join('\n') : '(none)'}\n*Total     : ₹${fixedTotal.toLocaleString('en-IN')}*`
+    );
+    replyParts.push(
+      `\n📈 *Gross Profit : ₹${grossProfit.toLocaleString('en-IN')}*\n📉 *Net Profit   : ₹${netProfit.toLocaleString('en-IN')}*`
+    );
+
+    await sendMessage(from, replyParts.join('\n'));
 
   } catch (error) {
     console.error("[QueryHandler] Error:", error);

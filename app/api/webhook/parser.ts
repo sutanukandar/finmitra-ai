@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_items, query_ingredient, query_vendor_breakdown, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -19,7 +19,23 @@ Categories for add_entries:
 
 If the message is about sales/revenue, use category: "sales".
 
-For query_specific — user asks for ONE metric, not full P&L:
+CRITICAL RULE — P&L vs single-metric:
+- If the user says P&L, profit, loss, summary, report, hisaab → ALWAYS use intent: "query_pnl". Never query_specific.
+- query_specific is ONLY for single-number questions: "how much is sales", "total expenses", "kitna bika".
+- When in doubt between query_pnl and query_specific: if the message contains P&L, report, or summary → query_pnl.
+
+For query_pnl — full profit & loss summary (revenue + COGS + fixed costs):
+- "aaj ka P&L" → {"intent": "query_pnl", "period": "today"}
+- "is mahine ka P&L" → {"intent": "query_pnl", "period": "mtd"}
+- "P&L for Mar 2026" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
+- "March ka P&L" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
+- "show me March P&L" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
+- "March 2026 profit and loss" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
+- "kal ka P&L" → {"intent": "query_pnl", "period": "yesterday"}
+- period: "today" | "yesterday" | "mtd" | "specific_month"
+- month: "YYYY-MM" — only when period = "specific_month"
+
+For query_specific — user asks for ONE number only, no full summary:
 - "aaj kitna bika", "today ka sale", "how much is today sales", "is mahine ka sale"
   → {"intent": "query_specific", "metric": "sales", "period": "today" or "mtd"}
 - "aaj kitna kharch hua", "today ka expense", "is mahine ka kharch"
@@ -30,7 +46,6 @@ For query_specific — user asks for ONE metric, not full P&L:
   → {"intent": "query_specific", "metric": "sales", "period": "specific_month", "month": "2026-03"}
 - period is "today" unless the message mentions a specific month or MTD
 - For a named month + year → period: "specific_month", month: "YYYY-MM"
-- Use query_specific only when asking for a single number, NOT full P&L
 
 For query_items — user asks for top items/ingredients by spend, optionally filtered by vendor and/or date:
 - "most expensive items this month"
@@ -72,13 +87,11 @@ For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "kitna kharcha kiya har vendor pe is mahine" → {"intent": "query_vendor_breakdown", "period": "mtd"}
 - period: "today" | "mtd" | "specific_month"; month: "YYYY-MM" only for specific_month
 
-For full P&L requests (aaj ka P&L, P&L kya hai, show P&L):
-  → {"intent": "query_today"} or {"intent": "query_mtd"}
-
 Example outputs:
 {"intent": "add_entries", "entries": [{"category": "sales", "amount": 3500, "date_offset": 0}]}
 {"intent": "query_specific", "metric": "sales", "period": "today"}
-{"intent": "query_today"}`;
+{"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
+{"intent": "query_pnl", "period": "today"}`;
 
     try {
       const aiResponse = await anthropic.messages.create({
