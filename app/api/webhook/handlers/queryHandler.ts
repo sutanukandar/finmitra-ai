@@ -134,8 +134,8 @@ export async function handlePnlQuery(
         const qty         = r.quantity_normalised ? Number(r.quantity_normalised) : Number(r.quantity);
         const unit        = r.unit_normalised || r.unit || 'pc';
         const amt         = Number(r.amount);
-        const ratePerUnit = qty > 0 ? (amt / qty).toFixed(0) : Number(r.rate).toFixed(0);
-        return `${idx + 1}. ${displayName} — ₹${amt.toLocaleString('en-IN')} (${qty.toFixed(2)} ${unit} @ ₹${ratePerUnit}/${unit})`;
+        const qtyDisplay  = qty > 0 ? ` (${qty.toFixed(2)} ${unit})` : '';
+        return `${idx + 1}. ${displayName} — ₹${amt.toLocaleString('en-IN')}${qtyDisplay}`;
       });
 
       await sendMessage(from,
