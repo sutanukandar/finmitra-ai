@@ -44,13 +44,10 @@ export async function POST(req: NextRequest) {
       uploadRecordId
     );
 
-    const totals: any = {};
-    if (pnlField === 'hyperpure')      totals.hyperpure = foodTotal;
-    else if (pnlField === 'bigbasket') totals.bigbasket = foodTotal;
-    else                               totals.other     = foodTotal;
-    if (deliveryFee > 0) totals.other = (totals.other || 0) + deliveryFee;
-
-    await dataService.upsertPnlEntry(restaurantId, { date: entryDate, ...totals });
+    await dataService.accumulatePnlEntry(restaurantId, pnlField, entryDate, foodTotal);
+    if (deliveryFee > 0) {
+      await dataService.accumulatePnlEntry(restaurantId, 'other', entryDate, deliveryFee);
+    }
 
     await dataService.writeAuditLog(restaurantId, {
       action:          force && parsed.is_duplicate ? 'backfill_duplicate_override' : 'backfill',
