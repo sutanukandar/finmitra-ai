@@ -16,10 +16,15 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       let savedCount = 0;
 
       for (const entry of parsed.entries) {
-        // Calculate actual date from date_offset
-        const entryDate = new Date();
-        entryDate.setDate(entryDate.getDate() + (entry.date_offset || 0));
-        const finalDate = entryDate.toISOString().split('T')[0];
+        // Prefer explicit date from parser; fall back to date_offset for relative references
+        let finalDate: string;
+        if (entry.date) {
+          finalDate = entry.date;
+        } else {
+          const entryDate = new Date();
+          entryDate.setDate(entryDate.getDate() + (entry.date_offset || 0));
+          finalDate = entryDate.toISOString().split('T')[0];
+        }
 
         const category = (entry.category || '').toLowerCase().trim();
 
@@ -80,7 +85,7 @@ Reply *haan* to save anyway · *nahi* to cancel`;
           break;
         }
 
-        await dataService.accumulatePnlEntry(restaurantId, pnlColumn, finalDate, entry.amount || 0);
+        await dataService.accumulatePnlEntry(restaurantId, pnlColumn, finalDate, entry.amount || 0, 'whatsapp');
         console.log(`[TextHandler] Accumulated ${pnlColumn} += ₹${entry.amount} for date ${finalDate}`);
         await sendMessage(from, `✅ ${pnlColumn} ₹${entry.amount || 0} saved for ${formatDate(finalDate)}`);
         savedCount++;

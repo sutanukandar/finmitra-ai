@@ -19,6 +19,32 @@ Categories for add_entries:
 
 If the message is about sales/revenue, use category: "sales".
 
+Each line of the message may be a separate entry with its own date.
+Parse each line independently and return an array of entries.
+
+For each entry, extract the date field explicitly:
+- "25th May 2026" or "25 May 2026" → date: "2026-05-25"
+- "25 May" (no year) → date: current year, e.g. "2026-05-25"
+- "aaj" / "today" / no date mentioned → date: today (${todayDate})
+- "kal" / "yesterday" → date: yesterday
+
+Each entry must include its own date field. Never default all entries to today if
+dates are explicitly mentioned in the message.
+
+Example multi-line input:
+  Milk expense for 25th May 2026 : 456
+  Milk Expense for 26th May 2026 : 456
+  Milk Expense for 27th May 2026 : 456
+  Milk Expense for 28th May 2026 : 456
+
+Expected output:
+  {"intent": "add_entries", "entries": [
+    {"category": "milk", "amount": 456, "date": "2026-05-25"},
+    {"category": "milk", "amount": 456, "date": "2026-05-26"},
+    {"category": "milk", "amount": 456, "date": "2026-05-27"},
+    {"category": "milk", "amount": 456, "date": "2026-05-28"}
+  ]}
+
 CRITICAL RULE — P&L vs single-metric:
 - If the user says P&L, profit, loss, summary, report, hisaab → ALWAYS use intent: "query_pnl". Never query_specific.
 - query_specific is ONLY for single-number questions: "how much is sales", "total expenses", "kitna bika".

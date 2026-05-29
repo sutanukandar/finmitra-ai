@@ -8,6 +8,7 @@ export interface ParsedIntent {
     category: string;
     amount: number;
     date_offset?: number;
+    date?: string;       // explicit YYYY-MM-DD when parser extracts a specific date
   }>;
   metric?: string;         // for query_specific: 'sales' | 'cogs'
   period?: string;         // 'today' | 'mtd' | 'specific_date'
