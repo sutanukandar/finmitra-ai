@@ -19,20 +19,27 @@ export async function handlePnlQuery(
 
     // ── query_specific: single-metric answer ─────────────────────────────
     if (parsed?.intent === 'query_specific') {
-      let startDate: string, endDate: string | undefined;
-      if (parsed.period === 'specific_month' && parsed.month) {
-        startDate = parsed.month + '-01';
-        endDate   = parsed.month + '-' + new Date(
-          parseInt(parsed.month.split('-')[0]),
-          parseInt(parsed.month.split('-')[1]),
-          0
-        ).getDate().toString().padStart(2, '0');
+      let startDate: string, endDate: string, period_label: string;
+
+      if (parsed.period === 'specific_date' && parsed.date) {
+        startDate    = parsed.date;
+        endDate      = parsed.date;
+        period_label = new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+        });
+      } else if (parsed.period === 'specific_month' && parsed.month) {
+        const [y, m] = parsed.month.split('-').map(Number);
+        startDate    = `${parsed.month}-01`;
+        endDate      = new Date(y, m, 0).toISOString().split('T')[0];
+        period_label = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
       } else if (parsed.period === 'mtd') {
-        startDate = monthStart;
-        endDate   = today;
+        startDate    = monthStart;
+        endDate      = today;
+        period_label = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
       } else {
-        startDate = today;
-        endDate   = undefined;
+        startDate    = today;
+        endDate      = today;
+        period_label = 'Today';
       }
 
       const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
@@ -52,13 +59,7 @@ export async function handlePnlQuery(
         }
       });
 
-      const label        = parsed.metric === 'sales' ? 'Sales' : 'Expenses';
-      const period_label = parsed.period === 'specific_month' && parsed.month
-        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
-        : parsed.period === 'mtd'
-        ? `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`
-        : 'Today';
-
+      const label = parsed.metric === 'sales' ? 'Sales' : 'Expenses';
       await sendMessage(from, `${period_label}'s ${label}: ₹${total.toLocaleString('en-IN')}`);
       return;
     }

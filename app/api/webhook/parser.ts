@@ -40,12 +40,25 @@ For query_specific — user asks for ONE number only, no full summary:
   → {"intent": "query_specific", "metric": "sales", "period": "today" or "mtd"}
 - "aaj kitna kharch hua", "today ka expense", "is mahine ka kharch"
   → {"intent": "query_specific", "metric": "cogs", "period": "today" or "mtd"}
+- "Sales for 25 May 2026"
+  → {"intent": "query_specific", "metric": "sales", "period": "specific_date", "date": "2026-05-25"}
+- "Sales for 24th May"
+  → {"intent": "query_specific", "metric": "sales", "period": "specific_date", "date": "2026-05-24"}
+- "25 May ka sales"
+  → {"intent": "query_specific", "metric": "sales", "period": "specific_date", "date": "2026-05-25"}
+- "Expenses on 15 March"
+  → {"intent": "query_specific", "metric": "cogs", "period": "specific_date", "date": "2026-03-15"}
 - "Total Expenses for Mar 2026", "March ka total kharch"
   → {"intent": "query_specific", "metric": "cogs", "period": "specific_month", "month": "2026-03"}
 - "March 2026 sales", "Mar 26 sales"
   → {"intent": "query_specific", "metric": "sales", "period": "specific_month", "month": "2026-03"}
-- period is "today" unless the message mentions a specific month or MTD
-- For a named month + year → period: "specific_month", month: "YYYY-MM"
+- Period rules:
+  specific_date: user mentions a full date (day + month). date field: "YYYY-MM-DD"
+  specific_month: user mentions only a month/year with no day. month field: "YYYY-MM"
+  "25 May 2026" → specific_date, date: "2026-05-25"
+  "May 2026" → specific_month, month: "2026-05"
+  "25 May" (no year) → specific_date, assume current year ${todayDate.slice(0, 4)}
+  period defaults to "today" if no date or month is mentioned
 
 For query_items — user asks for top items/ingredients by spend, optionally filtered by vendor and/or date:
 - "most expensive items this month"
