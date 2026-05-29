@@ -364,6 +364,23 @@ export const dataService = {
       .slice(0, 8);
   },
 
+  async zeroPnlColumn(
+    restaurantId: string,
+    category: string,
+    date: string
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('pnl_entries')
+      .update({ [category]: 0 })
+      .eq('restaurant_id', restaurantId)
+      .eq('date', date);
+    if (error) {
+      console.error("[dataService] zeroPnlColumn failed:", error);
+      throw error;
+    }
+    console.log(`[dataService] Zeroed ${category} for ${date}`);
+  },
+
   async writeAuditLog(
     restaurantId: string,
     data: {

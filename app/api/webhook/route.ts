@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 import { handleConfirmation } from './handlers/confirmationHandler';
+import { handleDelete } from './handlers/deleteHandler';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -42,13 +43,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // 2. Media Upload
+    // 2. Delete flow ("hata do", "hatao", "delete <category>")
+    const DELETE_RE = /hata\s*do|hatao|\bdelete\b/i;
+    if (DELETE_RE.test(body)) {
+      await handleDelete(from, restaurant.id, body);
+      return NextResponse.json({ success: true });
+    }
+
+    // 3. Media Upload
     if (mediaUrl) {
       await handleMediaUpload(from, restaurant.id, mediaUrl, mediaType);
       return NextResponse.json({ success: true });
     }
 
-    // 3. Normal Text Message (P&L queries, etc.)
+    // 4. Normal Text Message (P&L queries, etc.)
     await handleTextMessage(from, restaurant.id, body);
 
     console.log(`[Webhook] Processed in ${Date.now() - startTime}ms`);

@@ -2,16 +2,42 @@ import { dataService } from '../../../../lib/db/dataService';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
   const lowerBody = body.toLowerCase().trim();
-  const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(lowerBody);
-  const isCancel = ['nahi', 'no', 'cancel'].includes(lowerBody);
-
-  if (!isConfirm && !isCancel) {
-    return false;
-  }
 
   try {
+    // Fetch pending first — needed for delete_pick check before haan/nahi
     const pending = await dataService.getPendingConfirmation(restaurantId);
-    const action  = pending?.action || 'confirm_bill';
+    const action  = pending?.action || '';
+
+    // ── delete_pick: numeric selection (1 / 2 / 3) ───────────────────────
+    if (action === 'delete_pick' && /^[123]$/.test(lowerBody)) {
+      const idx    = parseInt(lowerBody) - 1;
+      const option = pending?.payload?.options?.[idx];
+
+      if (!option) {
+        await sendMessage(from, 'Please reply 1, 2 or 3.');
+        return true;
+      }
+
+      await dataService.deletePendingConfirmation(restaurantId);
+      await dataService.createPendingConfirmation(restaurantId, {
+        category: pending!.payload.category,
+        date:     option.date,
+        amount:   option.amount,
+      }, 'confirm_delete');
+
+      await sendMessage(from,
+        `🗑️ *${pending!.payload.category} ₹${Number(option.amount).toLocaleString('en-IN')} for ${formatDate(option.date)}*\n\nConfirm delete? Reply *haan* · *nahi*`
+      );
+      return true;
+    }
+
+    // ── haan / nahi check ────────────────────────────────────────────────
+    const isConfirm = ['haan', 'yes', 'confirm', 'okay'].includes(lowerBody);
+    const isCancel  = ['nahi', 'no', 'cancel'].includes(lowerBody);
+
+    if (!isConfirm && !isCancel) {
+      return false;
+    }
 
     if (isConfirm) {
       if (!pending) {
@@ -19,8 +45,26 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
         return true;
       }
 
+      // ── confirm_delete: zero out the chosen column for that date ─────────
+      if (action === 'confirm_delete') {
+        const { category, date, amount } = pending.payload || {};
+        console.log(`[ConfirmationHandler] Deleting ${category} ₹${amount} for ${date}`);
+
+        await dataService.zeroPnlColumn(restaurantId, category, date);
+
+        await dataService.writeAuditLog(restaurantId, {
+          action:          'delete',
+          date_affected:   date,
+          pnl_field:       category,
+          amount_reversed: amount,
+        });
+
+        await sendMessage(from,
+          `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.`
+        );
+
       // ── confirm_text_entry: duplicate text entry — accumulate on top ─────
-      if (action === 'confirm_text_entry') {
+      } else if (action === 'confirm_text_entry') {
         const { category, date, amount } = pending.payload || {};
         console.log(`[ConfirmationHandler] Text duplicate override: ${category} ₹${amount} for ${date}`);
 
@@ -106,7 +150,9 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
 
     } else {
       // ── nahi / cancel ────────────────────────────────────────────────────
-      if (action === 'confirm_text_entry') {
+      if (action === 'confirm_delete') {
+        await sendMessage(from, "Cancelled. Nothing was deleted.");
+      } else if (action === 'confirm_text_entry') {
         await sendMessage(from, "Cancelled. Nothing was saved.");
       } else {
         await sendMessage(from, "Cancelled. Bill was not saved.");
@@ -125,8 +171,8 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
 
 function formatDate(isoDate: string): string {
   if (!isoDate) return 'that date';
-  return new Date(isoDate).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
+  return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
   });
 }
 
@@ -135,10 +181,9 @@ async function sendMessage(to: string, body: string) {
     process.env.TWILIO_ACCOUNT_SID,
     process.env.TWILIO_AUTH_TOKEN
   );
-
   await twilio.messages.create({
     from: 'whatsapp:+14155238886',
-    to: `whatsapp:${to}`,
-    body: body,
+    to:   `whatsapp:${to}`,
+    body,
   });
 }
