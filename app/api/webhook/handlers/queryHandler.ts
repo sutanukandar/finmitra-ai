@@ -49,18 +49,51 @@ export async function handlePnlQuery(
         return;
       }
 
-      let total = 0;
+      let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
+      let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, other = 0;
+      let rent = 0, electricity = 0, salary = 0, fixed = 0, gas = 0;
+
       entries.forEach((e: any) => {
-        if (parsed.metric === 'sales') {
-          total += (e.sales || 0) + (e.swiggy || 0) + (e.zomato || 0) + (e.phonepe || 0);
-        } else {
-          total += (e.hyperpure || 0) + (e.bigbasket || 0) + (e.milk || 0) +
-                   (e.bread || 0) + (e.other || 0);
-        }
+        sales      += e.sales       || 0;
+        swiggy     += e.swiggy      || 0;
+        zomato     += e.zomato      || 0;
+        phonepe    += e.phonepe     || 0;
+        hyperpure  += e.hyperpure   || 0;
+        bigbasket  += e.bigbasket   || 0;
+        milk       += e.milk        || 0;
+        bread      += e.bread       || 0;
+        other      += e.other       || 0;
+        rent       += e.rent        || 0;
+        electricity+= e.electricity || 0;
+        salary     += e.salary      || 0;
+        fixed      += e.fixed       || 0;
+        gas        += e.gas         || 0;
       });
 
-      const label = parsed.metric === 'sales' ? 'Sales' : 'Expenses';
-      await sendMessage(from, `${period_label}'s ${label}: ₹${total.toLocaleString('en-IN')}`);
+      const revenue    = sales + swiggy + zomato + phonepe;
+      const cogs       = hyperpure + bigbasket + milk + bread + other;
+      const fixedTotal = rent + electricity + salary + fixed + gas;
+
+      let reply: string;
+
+      if (parsed.metric === 'cogs_pct_revenue') {
+        const pct = revenue > 0 ? ((cogs / revenue) * 100).toFixed(1) : '0';
+        reply = `${period_label} COGS is ${pct}% of Revenue\n(₹${cogs.toLocaleString('en-IN')} COGS ÷ ₹${revenue.toLocaleString('en-IN')} Revenue)`;
+      } else if (parsed.metric === 'gross_margin_pct') {
+        const grossProfit = revenue - cogs;
+        const pct = revenue > 0 ? ((grossProfit / revenue) * 100).toFixed(1) : '0';
+        reply = `${period_label} Gross Margin: ${pct}%\n(₹${grossProfit.toLocaleString('en-IN')} ÷ ₹${revenue.toLocaleString('en-IN')} Revenue)`;
+      } else if (parsed.metric === 'net_margin_pct') {
+        const netProfit = revenue - cogs - fixedTotal;
+        const pct = revenue > 0 ? ((netProfit / revenue) * 100).toFixed(1) : '0';
+        reply = `${period_label} Net Margin: ${pct}%\n(₹${netProfit.toLocaleString('en-IN')} ÷ ₹${revenue.toLocaleString('en-IN')} Revenue)`;
+      } else if (parsed.metric === 'sales') {
+        reply = `${period_label}'s Sales: ₹${revenue.toLocaleString('en-IN')}`;
+      } else {
+        reply = `${period_label}'s Expenses: ₹${cogs.toLocaleString('en-IN')}`;
+      }
+
+      await sendMessage(from, reply);
       return;
     }
 

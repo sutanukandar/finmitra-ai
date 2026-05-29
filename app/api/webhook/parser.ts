@@ -52,6 +52,15 @@ For query_specific — user asks for ONE number only, no full summary:
   → {"intent": "query_specific", "metric": "cogs", "period": "specific_month", "month": "2026-03"}
 - "March 2026 sales", "Mar 26 sales"
   → {"intent": "query_specific", "metric": "sales", "period": "specific_month", "month": "2026-03"}
+- "COGS as % of revenue for May", "food cost percentage"
+  → {"intent": "query_specific", "metric": "cogs_pct_revenue", "period": "specific_month", "month": "2026-05"}
+- "what % of revenue is food cost?"
+  → {"intent": "query_specific", "metric": "cogs_pct_revenue", "period": "mtd"}
+- "gross margin for March", "March ka gross margin"
+  → {"intent": "query_specific", "metric": "gross_margin_pct", "period": "specific_month", "month": "2026-03"}
+- "net profit margin", "net margin this month"
+  → {"intent": "query_specific", "metric": "net_margin_pct", "period": "mtd"}
+- metric values: "sales" | "cogs" | "cogs_pct_revenue" | "gross_margin_pct" | "net_margin_pct"
 - Period rules:
   specific_date: user mentions a full date (day + month). date field: "YYYY-MM-DD"
   specific_month: user mentions only a month/year with no day. month field: "YYYY-MM"
