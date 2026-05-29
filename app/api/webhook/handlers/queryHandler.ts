@@ -399,6 +399,15 @@ ${vendorLines}`
         startDate   = start.toISOString().split('T')[0];
         endDate     = end.toISOString().split('T')[0];
         periodLabel = `Last ${n} Days`;
+      } else if (parsed.period === 'last_n_days_of_month' && parsed.month) {
+        const [y, m] = parsed.month.split('-').map(Number);
+        const n      = parsed.days || 7;
+        const lastDay  = new Date(y, m, 0);
+        const firstDay = new Date(lastDay);
+        firstDay.setDate(lastDay.getDate() - (n - 1));
+        startDate   = firstDay.toISOString().split('T')[0];
+        endDate     = lastDay.toISOString().split('T')[0];
+        periodLabel = `Last ${n} Days of ${lastDay.toLocaleString('en-IN', { month: 'long', year: 'numeric' })}`;
       } else if (parsed.period === 'specific_month' && parsed.month) {
         const [y, m] = parsed.month.split('-').map(Number);
         startDate    = `${parsed.month}-01`;
