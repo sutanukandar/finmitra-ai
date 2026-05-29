@@ -93,31 +93,33 @@ export async function handleDelete(from: string, restaurantId: string, body: str
   }
 
   // ── No date → fetch last 3 entries for this category ────────────────
-  const { data: rows } = await supabase
+  const { data: rawRows } = await supabase
     .from('pnl_entries')
-    .select(`date, ${category}, updated_at`)
+    .select('*')
     .eq('restaurant_id', restaurantId)
-    .gt(category, 0)
+    .gt(category as string, 0)
     .order('updated_at', { ascending: false })
     .limit(3);
 
-  if (!rows || rows.length === 0) {
+  const rows = (rawRows || []) as any[];
+
+  if (rows.length === 0) {
     await sendMessage(from, `No ${category} entries found to delete.`);
     return;
   }
 
   const numberEmoji = ['1️⃣', '2️⃣', '3️⃣'];
   const lines = rows.map((r, i) => {
-    const amount  = Number((r as any)[category]);
-    const timeAgo = getTimeAgo((r as any).updated_at);
+    const amount  = Number(r[category]);
+    const timeAgo = getTimeAgo(r.updated_at as string);
     return `${numberEmoji[i]} ${formatDate(r.date)} — ₹${amount.toLocaleString('en-IN')} (${timeAgo})`;
   });
 
   await dataService.createPendingConfirmation(restaurantId, {
     category,
-    options: rows.map(r => ({
+    options: rows.map((r: any) => ({
       date:   r.date,
-      amount: Number((r as any)[category]),
+      amount: Number(r[category]),
     })),
   }, 'delete_pick');
 
