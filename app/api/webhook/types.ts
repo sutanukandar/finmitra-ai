@@ -3,7 +3,7 @@
 // =============================================
 
 export interface ParsedIntent {
-  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_pnl' | 'query_items' | 'query_ingredient' | 'query_vendor_breakdown' | 'help' | 'unknown';
+  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_pnl' | 'query_items' | 'query_ingredient' | 'query_vendor_breakdown' | 'query_daily_breakdown' | 'help' | 'unknown';
   entries?: Array<{
     category: string;
     amount: number;
@@ -18,6 +18,7 @@ export interface ParsedIntent {
   ingredient?: string;     // for query_ingredient: e.g. "Carrot"
   month?: string;          // for query_ingredient specific_month: YYYY-MM
   months?: string[];       // for multi_month period: ["YYYY-MM", ...]
+  days?: number;           // for last_n_days period: number of days
 }
 
 export interface PnlEntryData {

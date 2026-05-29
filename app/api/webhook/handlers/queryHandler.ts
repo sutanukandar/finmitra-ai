@@ -385,6 +385,82 @@ ${vendorLines}`
       return;
     }
 
+    // ── query_daily_breakdown: day-by-day values for one metric ─────────
+    if (parsed?.intent === 'query_daily_breakdown') {
+      let startDate: string, endDate: string, periodLabel: string;
+
+      if (parsed.period === 'last_n_days') {
+        const n     = parsed.days || 7;
+        const end   = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - (n - 1));
+        startDate   = start.toISOString().split('T')[0];
+        endDate     = end.toISOString().split('T')[0];
+        periodLabel = `Last ${n} Days`;
+      } else if (parsed.period === 'specific_month' && parsed.month) {
+        const [y, m] = parsed.month.split('-').map(Number);
+        startDate    = `${parsed.month}-01`;
+        endDate      = new Date(y, m, 0).toISOString().split('T')[0];
+        periodLabel  = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+      } else {
+        startDate   = monthStart;
+        endDate     = today;
+        periodLabel = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      }
+
+      const { data: entries } = await supabase
+        .from('pnl_entries')
+        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, other, rent, electricity, salary, fixed, gas')
+        .eq('restaurant_id', restaurantId)
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .order('date', { ascending: true });
+
+      if (!entries || entries.length === 0) {
+        await sendMessage(from, 'No data found for this period.');
+        return;
+      }
+
+      const metric = parsed.metric || 'revenue';
+
+      const getValue = (e: any): number => {
+        if (metric === 'revenue')
+          return (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
+                 (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
+        if (metric === 'cogs')
+          return (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
+                 (Number(e.milk) || 0) + (Number(e.bread) || 0) + (Number(e.other) || 0);
+        if (metric === 'fixed')
+          return (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
+                 (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
+        return Number(e[metric]) || 0;
+      };
+
+      const metricLabel = metric.charAt(0).toUpperCase() + metric.slice(1);
+
+      const lines = (entries as any[])
+        .map(e => ({
+          dateLabel: new Date(e.date + 'T00:00:00').toLocaleDateString('en-IN', {
+            weekday: 'short', day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
+          }),
+          val: getValue(e),
+        }))
+        .filter(({ val }) => val > 0)
+        .map(({ dateLabel, val }) => `${dateLabel}: ₹${val.toLocaleString('en-IN')}`);
+
+      if (lines.length === 0) {
+        await sendMessage(from, `No ${metricLabel} data found for ${periodLabel}.`);
+        return;
+      }
+
+      const total = (entries as any[]).reduce((s, e) => s + getValue(e), 0);
+
+      await sendMessage(from,
+        `📅 *${metricLabel} — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`
+      );
+      return;
+    }
+
     // ── full P&L summary (query_today / query_mtd / query_pnl) ──────────
     let startDate = today;
     let endDate: string | undefined;

@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
@@ -110,6 +110,24 @@ For query_ingredient — user asks about a specific ingredient across vendors:
 - ingredient: always Capitalised, generic name (Carrot not fresho carrot)
 - period: "today" | "mtd" | "specific_month"
 - month: "YYYY-MM" — only when period = "specific_month"
+
+For query_daily_breakdown — user wants day-by-day values for one metric over a date range:
+- "daily milk expenses for last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "milk", "period": "last_n_days", "days": 7}
+- "show me daily sales for last 10 days"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 10}
+- "day wise phonepe last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "phonepe", "period": "last_n_days", "days": 7}
+- "daily expenses for last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "cogs", "period": "last_n_days", "days": 7}
+- "milk expenses in March day by day"
+  → {"intent": "query_daily_breakdown", "metric": "milk", "period": "specific_month", "month": "2026-03"}
+- "daily revenue for May"
+  → {"intent": "query_daily_breakdown", "metric": "revenue", "period": "specific_month", "month": "2026-05"}
+- metric: any pnl column ("milk", "sales", "phonepe", "bigbasket", "hyperpure", "bread",
+  "other", "rent", "salary") OR computed value "cogs" / "revenue" / "fixed"
+- period: "last_n_days" (requires days field) | "specific_month" (requires month field) | "mtd"
+- days: number of days for last_n_days, default 7
 
 For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "how much expense from BigBasket, Hyperpure, DMart"
