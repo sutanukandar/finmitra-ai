@@ -17,6 +17,75 @@ export async function handlePnlQuery(
     const today = new Date().toISOString().split('T')[0];
     const monthStart = today.slice(0, 7) + '-01';
 
+    // ── query_specific: multi-month comparison ───────────────────────────
+    if (parsed?.intent === 'query_specific' &&
+        parsed.period === 'multi_month' &&
+        parsed.months && parsed.months.length > 0) {
+
+      const startDate = parsed.months[0] + '-01';
+      const lastMonth = parsed.months[parsed.months.length - 1];
+      const [ly, lm]  = lastMonth.split('-').map(Number);
+      const endDate   = new Date(ly, lm, 0).toISOString().split('T')[0];
+
+      const { data: entries } = await supabase
+        .from('pnl_entries')
+        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, other, rent, electricity, salary, fixed, gas')
+        .eq('restaurant_id', restaurantId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+      if (!entries || entries.length === 0) {
+        await sendMessage(from, 'No data found for this period.');
+        return;
+      }
+
+      const byMonth: Record<string, { revenue: number; cogs: number; fixed: number }> = {};
+      parsed.months.forEach((mo: string) => { byMonth[mo] = { revenue: 0, cogs: 0, fixed: 0 }; });
+
+      entries.forEach((e: any) => {
+        const mo = (e.date as string).slice(0, 7);
+        if (!byMonth[mo]) return;
+        byMonth[mo].revenue += (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
+                               (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
+        byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
+                               (Number(e.milk) || 0) + (Number(e.bread) || 0) + (Number(e.other) || 0);
+        byMonth[mo].fixed   += (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
+                               (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
+      });
+
+      const lines = parsed.months.map((mo: string) => {
+        const d = byMonth[mo];
+        const monthLabel = new Date(mo + '-01').toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+        if (parsed.metric === 'cogs_pct_revenue') {
+          const pct = d.revenue > 0 ? ((d.cogs / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(d.cogs).toLocaleString('en-IN')} ÷ ₹${Math.round(d.revenue).toLocaleString('en-IN')})`;
+        }
+        if (parsed.metric === 'gross_margin_pct') {
+          const gp  = d.revenue - d.cogs;
+          const pct = d.revenue > 0 ? ((gp / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(gp).toLocaleString('en-IN')})`;
+        }
+        if (parsed.metric === 'net_margin_pct') {
+          const np  = d.revenue - d.cogs - d.fixed;
+          const pct = d.revenue > 0 ? ((np / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(np).toLocaleString('en-IN')})`;
+        }
+        return `${monthLabel}: ₹${Math.round(d.revenue).toLocaleString('en-IN')}`;
+      });
+
+      const metricLabel: Record<string, string> = {
+        cogs_pct_revenue: 'COGS % of Revenue',
+        gross_margin_pct: 'Gross Margin',
+        net_margin_pct:   'Net Margin',
+        sales:            'Revenue',
+        cogs:             'Expenses',
+      };
+
+      const metric = parsed.metric ?? '';
+      await sendMessage(from, `📊 *${metricLabel[metric] || metric}*\n\n${lines.join('\n')}`);
+      return;
+    }
+
     // ── query_specific: single-metric answer ─────────────────────────────
     if (parsed?.intent === 'query_specific') {
       let startDate: string, endDate: string, period_label: string;

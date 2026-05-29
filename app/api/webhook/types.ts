@@ -17,6 +17,7 @@ export interface ParsedIntent {
   sort_by?: string;        // for query_items: 'value' | 'weight', default 'value'
   ingredient?: string;     // for query_ingredient: e.g. "Carrot"
   month?: string;          // for query_ingredient specific_month: YYYY-MM
+  months?: string[];       // for multi_month period: ["YYYY-MM", ...]
 }
 
 export interface PnlEntryData {

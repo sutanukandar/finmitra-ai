@@ -60,6 +60,15 @@ For query_specific — user asks for ONE number only, no full summary:
   → {"intent": "query_specific", "metric": "gross_margin_pct", "period": "specific_month", "month": "2026-03"}
 - "net profit margin", "net margin this month"
   → {"intent": "query_specific", "metric": "net_margin_pct", "period": "mtd"}
+- "COGS % for March, April and May 2026"
+  → {"intent": "query_specific", "metric": "cogs_pct_revenue", "period": "multi_month", "months": ["2026-03", "2026-04", "2026-05"]}
+- "compare gross margin across March April May"
+  → {"intent": "query_specific", "metric": "gross_margin_pct", "period": "multi_month", "months": ["2026-03", "2026-04", "2026-05"]}
+- "net profit for last 3 months"
+  → {"intent": "query_specific", "metric": "net_margin_pct", "period": "multi_month", "months": ["2026-03", "2026-04", "2026-05"]}
+- "sales for March and April"
+  → {"intent": "query_specific", "metric": "sales", "period": "multi_month", "months": ["2026-03", "2026-04"]}
+- multi_month rule: when user mentions 2+ months in one query → period: "multi_month", months: ["YYYY-MM", ...] in chronological order
 - metric values: "sales" | "cogs" | "cogs_pct_revenue" | "gross_margin_pct" | "net_margin_pct"
 - Period rules:
   specific_date: user mentions a full date (day + month). date field: "YYYY-MM-DD"
