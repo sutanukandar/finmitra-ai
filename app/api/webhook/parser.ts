@@ -154,9 +154,26 @@ For query_daily_breakdown — user wants day-by-day values for one metric over a
 - "daily revenue for May"
   → {"intent": "query_daily_breakdown", "metric": "revenue", "period": "specific_month", "month": "2026-05"}
 - metric: any pnl column ("milk", "sales", "phonepe", "bigbasket", "hyperpure", "bread",
-  "other", "rent", "salary") OR computed value "cogs" / "revenue" / "fixed"
+  "water", "other", "rent", "salary") OR computed value "cogs" / "revenue" / "fixed"
 - period: "last_n_days" (requires days field) | "specific_month" (requires month field) | "mtd"
 - days: number of days for last_n_days, default 7
+
+PERIOD PRIORITY RULE for query_daily_breakdown:
+If the message contains BOTH a relative range ("last 7 days", "last 10 days", "past week")
+AND a month name ("in May", "in March"):
+→ The relative range ALWAYS wins. "in May" is context/clarification, not the period.
+→ Always return period: "last_n_days" with the correct days count.
+→ The month qualifier is only used when NO relative range is present.
+
+Examples:
+"daily water expenses for last 7 days in May 2026"
+  → {"intent": "query_daily_breakdown", "metric": "water", "period": "last_n_days", "days": 7}
+"daily milk last 10 days in March"
+  → {"intent": "query_daily_breakdown", "metric": "milk", "period": "last_n_days", "days": 10}
+"daily sales for May 2026"  (no relative range)
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "specific_month", "month": "2026-05"}
+"daily sales last 7 days"  (no month)
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
 
 For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "how much expense from BigBasket, Hyperpure, DMart"
