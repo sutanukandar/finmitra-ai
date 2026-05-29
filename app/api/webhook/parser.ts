@@ -15,7 +15,8 @@ Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_s
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales
-- swiggy, phonepe, hyperpure, bigbasket, milk, bread, rent, electricity, gas, salary, fixed
+- swiggy, phonepe, hyperpure, bigbasket, milk, bread, water, rent, electricity, gas, salary, fixed
+- water / bisleri / drinking water → category: "water"
 
 If the message is about sales/revenue, use category: "sales".
 
@@ -146,6 +147,8 @@ For query_daily_breakdown — user wants day-by-day values for one metric over a
   → {"intent": "query_daily_breakdown", "metric": "phonepe", "period": "last_n_days", "days": 7}
 - "daily expenses for last 7 days"
   → {"intent": "query_daily_breakdown", "metric": "cogs", "period": "last_n_days", "days": 7}
+- "daily water expenses last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "water", "period": "last_n_days", "days": 7}
 - "milk expenses in March day by day"
   → {"intent": "query_daily_breakdown", "metric": "milk", "period": "specific_month", "month": "2026-03"}
 - "daily revenue for May"

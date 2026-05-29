@@ -48,6 +48,7 @@ function mapVariableItem(item: string): string {
   const v = item.toLowerCase();
   if (v.includes('milk') || v.includes('doodh')) return 'milk';
   if (v.includes('bread') || v.includes('bun') || v.includes('pav')) return 'bread';
+  if (v.includes('water') || v.includes('bisleri')) return 'water';
   return 'other';
 }
 

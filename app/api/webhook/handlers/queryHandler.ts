@@ -29,7 +29,7 @@ export async function handlePnlQuery(
 
       const { data: entries } = await supabase
         .from('pnl_entries')
-        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, other, rent, electricity, salary, fixed, gas')
+        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas')
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate);
@@ -48,7 +48,8 @@ export async function handlePnlQuery(
         byMonth[mo].revenue += (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
                                (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
         byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
-                               (Number(e.milk) || 0) + (Number(e.bread) || 0) + (Number(e.other) || 0);
+                               (Number(e.milk) || 0) + (Number(e.bread) || 0) +
+                               (Number(e.water) || 0) + (Number(e.other) || 0);
         byMonth[mo].fixed   += (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
                                (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
       });
@@ -119,7 +120,7 @@ export async function handlePnlQuery(
       }
 
       let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
-      let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, other = 0;
+      let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
       let rent = 0, electricity = 0, salary = 0, fixed = 0, gas = 0;
 
       entries.forEach((e: any) => {
@@ -131,6 +132,7 @@ export async function handlePnlQuery(
         bigbasket  += e.bigbasket   || 0;
         milk       += e.milk        || 0;
         bread      += e.bread       || 0;
+        water      += e.water       || 0;
         other      += e.other       || 0;
         rent       += e.rent        || 0;
         electricity+= e.electricity || 0;
@@ -140,7 +142,7 @@ export async function handlePnlQuery(
       });
 
       const revenue    = sales + swiggy + zomato + phonepe;
-      const cogs       = hyperpure + bigbasket + milk + bread + other;
+      const cogs       = hyperpure + bigbasket + milk + bread + water + other;
       const fixedTotal = rent + electricity + salary + fixed + gas;
 
       let reply: string;
@@ -410,7 +412,7 @@ ${vendorLines}`
 
       const { data: entries } = await supabase
         .from('pnl_entries')
-        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, other, rent, electricity, salary, fixed, gas')
+        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas')
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate)
@@ -429,7 +431,8 @@ ${vendorLines}`
                  (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
         if (metric === 'cogs')
           return (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
-                 (Number(e.milk) || 0) + (Number(e.bread) || 0) + (Number(e.other) || 0);
+                 (Number(e.milk) || 0) + (Number(e.bread) || 0) +
+                 (Number(e.water) || 0) + (Number(e.other) || 0);
         if (metric === 'fixed')
           return (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
                  (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
@@ -499,7 +502,7 @@ ${vendorLines}`
     }
 
     let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
-    let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, other = 0;
+    let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
     let rent = 0, salary = 0, electricity = 0, gas = 0, fixedAmt = 0;
 
     entries.forEach((e: any) => {
@@ -511,6 +514,7 @@ ${vendorLines}`
       bigbasket  += e.bigbasket  || 0;
       milk       += e.milk       || 0;
       bread      += e.bread      || 0;
+      water      += e.water      || 0;
       other      += e.other      || 0;
       rent       += e.rent       || 0;
       salary     += e.salary     || 0;
@@ -520,7 +524,7 @@ ${vendorLines}`
     });
 
     const revenue    = sales + swiggy + zomato + phonepe;
-    const cogs       = hyperpure + bigbasket + milk + bread + other;
+    const cogs       = hyperpure + bigbasket + milk + bread + water + other;
     const fixedTotal = rent + salary + electricity + gas + fixedAmt;
     const grossProfit = revenue - cogs;
     const netProfit   = grossProfit - fixedTotal;
@@ -537,6 +541,7 @@ ${vendorLines}`
     if (bigbasket) cogsLines.push(`BigBasket  : ₹${bigbasket.toLocaleString('en-IN')}`);
     if (milk)      cogsLines.push(`Milk       : ₹${milk.toLocaleString('en-IN')}`);
     if (bread)     cogsLines.push(`Bread      : ₹${bread.toLocaleString('en-IN')}`);
+    if (water)     cogsLines.push(`Water      : ₹${water.toLocaleString('en-IN')}`);
     if (other)     cogsLines.push(`Other      : ₹${other.toLocaleString('en-IN')}`);
 
     const fixedLines: string[] = [];
