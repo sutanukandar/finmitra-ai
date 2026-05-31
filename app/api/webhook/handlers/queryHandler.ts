@@ -159,9 +159,9 @@ export async function handlePnlQuery(
         const pct = revenue > 0 ? ((netProfit / revenue) * 100).toFixed(1) : '0';
         reply = `${period_label} Net Margin: ${pct}%\n(₹${netProfit.toLocaleString('en-IN')} ÷ ₹${revenue.toLocaleString('en-IN')} Revenue)`;
       } else if (parsed.metric === 'sales') {
-        reply = `${period_label}'s Sales: ₹${revenue.toLocaleString('en-IN')}`;
+        reply = `${period_label} Sales: ₹${revenue.toLocaleString('en-IN')}`;
       } else {
-        reply = `${period_label}'s Expenses: ₹${cogs.toLocaleString('en-IN')}`;
+        reply = `${period_label} Expenses: ₹${cogs.toLocaleString('en-IN')}`;
       }
 
       await sendMessage(from, reply);
@@ -539,11 +539,11 @@ ${vendorLines}`
     const netProfit   = grossProfit - fixedTotal;
 
     // Only show line items that have a non-zero value
+    const qrSales = phonepe + sales;
     const revLines: string[] = [];
-    if (phonepe)  revLines.push(`PhonePe    : ₹${phonepe.toLocaleString('en-IN')}`);
-    if (swiggy)   revLines.push(`Swiggy     : ₹${swiggy.toLocaleString('en-IN')}`);
-    if (zomato)   revLines.push(`Zomato     : ₹${zomato.toLocaleString('en-IN')}`);
-    if (sales)    revLines.push(`Sales      : ₹${sales.toLocaleString('en-IN')}`);
+    revLines.push(`Sales (QR/Online) : ₹${qrSales.toLocaleString('en-IN')}`);
+    if (swiggy) revLines.push(`Swiggy            : ₹${swiggy.toLocaleString('en-IN')}`);
+    if (zomato) revLines.push(`Zomato            : ₹${zomato.toLocaleString('en-IN')}`);
 
     const cogsLines: string[] = [];
     if (hyperpure) cogsLines.push(`Hyperpure  : ₹${hyperpure.toLocaleString('en-IN')}`);
