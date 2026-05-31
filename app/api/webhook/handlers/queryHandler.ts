@@ -288,15 +288,52 @@ export async function handlePnlQuery(
         .lte('date', endDate)
         .order('date', { ascending: true });
 
+      // Ingredients that can also appear as direct pnl_entries columns
+      const pnlColumnMap: Record<string, string> = {
+        milk:  'milk',
+        bread: 'bread',
+        water: 'water',
+      };
+      const pnlColumn = pnlColumnMap[ingredient.toLowerCase()];
+
+      // Fetch pnl_entries total for milk/bread/water (WhatsApp/Excel direct entries)
+      let pnlTotal = 0;
+      if (pnlColumn) {
+        const { data: pnlRows } = await supabase
+          .from('pnl_entries')
+          .select(`date, ${pnlColumn}`)
+          .eq('restaurant_id', restaurantId)
+          .gte('date', startDate)
+          .lte('date', endDate);
+
+        pnlTotal = ((pnlRows || []) as any[]).reduce(
+          (s, r) => s + Number(r[pnlColumn] || 0), 0
+        );
+      }
+
+      const invoiceTotal = rows ? (rows as any[]).reduce((s, r) => s + Number(r.amount), 0) : 0;
+      const grandTotal   = invoiceTotal + pnlTotal;
+
       if (!rows || rows.length === 0) {
-        await sendMessage(from, `No ${ingredient} purchases found for this period.`);
+        if (pnlTotal > 0) {
+          const periodLabel2 = parsed.period === 'specific_month' && parsed.month
+            ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+            : parsed.period === 'today' ? 'Today'
+            : `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
+          await sendMessage(from,
+            `📦 *${ingredient} — ${periodLabel2}*\n\n` +
+            `Total spent : ₹${pnlTotal.toLocaleString('en-IN')}\n\n` +
+            `By source:\n  • Daily entries (WhatsApp/Excel): ₹${pnlTotal.toLocaleString('en-IN')}`
+          );
+        } else {
+          await sendMessage(from, `No ${ingredient} purchases found for this period.`);
+        }
         return;
       }
 
-      const totalSpend   = (rows as any[]).reduce((s, r) => s + Number(r.amount), 0);
       const totalQtyNorm = (rows as any[]).reduce((s, r) => s + Number(r.quantity_normalised || r.quantity || 0), 0);
       const unit         = (rows[0] as any).unit_normalised || (rows[0] as any).unit || 'units';
-      const avgRate      = totalQtyNorm > 0 ? totalSpend / totalQtyNorm : 0;
+      const avgRate      = totalQtyNorm > 0 && invoiceTotal > 0 ? invoiceTotal / totalQtyNorm : 0;
 
       const byVendor: Record<string, { qty: number; spend: number }> = {};
       (rows as any[]).forEach(r => {
@@ -308,25 +345,30 @@ export async function handlePnlQuery(
 
       const vendorLines = Object.entries(byVendor)
         .sort((a, b) => b[1].spend - a[1].spend)
-        .map(([v, d]) => `  • ${v}: ${d.qty.toFixed(2)} ${unit} — ₹${d.spend.toLocaleString('en-IN')}`)
-        .join('\n');
+        .map(([v, d]) => `  • ${v}: ${d.qty.toFixed(2)} ${unit} — ₹${d.spend.toLocaleString('en-IN')}`);
+
+      if (pnlTotal > 0) {
+        vendorLines.push(`  • Daily entries (WhatsApp/Excel): ₹${pnlTotal.toLocaleString('en-IN')}`);
+      }
 
       const periodLabel = parsed.period === 'specific_month' && parsed.month
         ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
         : parsed.period === 'today'
         ? 'Today'
-        : `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+        : `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
+
+      const purchasesLabel = `${rows.length}${pnlTotal > 0 ? ' (bills) + daily entries' : ''}`;
 
       await sendMessage(from,
 `📦 *${ingredient} — ${periodLabel}*
 
 Total bought : ${totalQtyNorm.toFixed(2)} ${unit}
-Total spent  : ₹${totalSpend.toLocaleString('en-IN')}
+Total spent  : ₹${grandTotal.toLocaleString('en-IN')}
 Avg rate     : ₹${avgRate.toFixed(0)}/${unit}
-Purchases    : ${rows.length}
+Purchases    : ${purchasesLabel}
 
-By vendor:
-${vendorLines}`
+By source:
+${vendorLines.join('\n')}`
       );
       return;
     }
