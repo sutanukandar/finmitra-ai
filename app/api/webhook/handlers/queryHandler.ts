@@ -690,8 +690,7 @@ ${vendorLines.join('\n')}`
       `Total Sales  : ₹${Math.round(totals.revenue).toLocaleString('en-IN')}\n` +
       `Item Cost    : ₹${Math.round(totals.cogs).toLocaleString('en-IN')}\n` +
       `Fixed Cost   : ₹${Math.round(totals.fixedTotal).toLocaleString('en-IN')}\n\n` +
-      `${profitLine}\n\n` +
-      `_Reply *detail* for full breakdown_`;
+      `${profitLine}`;
 
     await sendMessage(from, summary);
 
