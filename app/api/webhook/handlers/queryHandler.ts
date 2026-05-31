@@ -602,22 +602,45 @@ ${vendorLines.join('\n')}`
       return;
     }
 
-    // ── query_pnl_detail: full breakdown using saved pnl_context ─────────
+    // ── query_pnl_detail: full breakdown ────────────────────────────────
     if (parsed?.intent === 'query_pnl_detail') {
-      const { data: ctxRow } = await supabase
-        .from('pending_confirmations')
-        .select('payload')
-        .eq('restaurant_id', restaurantId)
-        .eq('action', 'pnl_context')
-        .gt('expires_at', new Date().toISOString())
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      let detailStart: string, detailEnd: string, detailLabel: string;
 
-      const ctx          = ctxRow?.payload as any;
-      const detailStart  = ctx?.startDate  || today;
-      const detailEnd    = ctx?.endDate    || today;
-      const detailLabel  = ctx?.periodLabel || 'Today';
+      if (parsed.period && parsed.period !== 'from_context') {
+        // Period supplied directly — resolve same as query_pnl
+        if (parsed.period === 'specific_month' && parsed.month) {
+          const [y, m] = parsed.month.split('-').map(Number);
+          detailStart  = `${parsed.month}-01`;
+          detailEnd    = new Date(y, m, 0).toISOString().split('T')[0];
+          detailLabel  = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+        } else if (parsed.period === 'yesterday') {
+          detailStart = detailEnd = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
+          detailLabel = 'Yesterday';
+        } else if (parsed.period === 'mtd') {
+          detailStart = monthStart;
+          detailEnd   = today;
+          detailLabel = `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
+        } else {
+          detailStart = detailEnd = today;
+          detailLabel = 'Today';
+        }
+      } else {
+        // No period — fall back to last pnl_context
+        const { data: ctxRow } = await supabase
+          .from('pending_confirmations')
+          .select('payload')
+          .eq('restaurant_id', restaurantId)
+          .eq('action', 'pnl_context')
+          .gt('expires_at', new Date().toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const ctx   = ctxRow?.payload as any;
+        detailStart = ctx?.startDate  || today;
+        detailEnd   = ctx?.endDate    || today;
+        detailLabel = ctx?.periodLabel || 'Today';
+      }
 
       const { data: detailEntries } = await dataService.getPnlData(restaurantId, detailStart, detailEnd);
 

@@ -70,7 +70,12 @@ CRITICAL RULE — P&L vs single-metric:
 - query_specific is ONLY for single-number questions: "how much is sales", "total expenses", "kitna bika".
 - When in doubt between query_pnl and query_specific: if the message contains P&L, report, or summary → query_pnl.
 
-For query_pnl — full profit & loss summary (revenue + COGS + fixed costs):
+CRITICAL RULE — query_pnl vs query_pnl_detail:
+- If message contains ANY of: detailed, full, complete, itemwise, poora, breakdown → use query_pnl_detail (NOT query_pnl), and include period/month if mentioned.
+- query_pnl = no detail modifier present (shows 4-line summary)
+- query_pnl_detail = detail modifier present OR standalone "detail"/"breakdown"
+
+For query_pnl — 4-line P&L summary (no detail words):
 - "aaj ka P&L" → {"intent": "query_pnl", "period": "today"}
 - "is mahine ka P&L" → {"intent": "query_pnl", "period": "mtd"}
 - "P&L for Mar 2026" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
@@ -207,15 +212,25 @@ For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "kitna kharcha kiya har vendor pe is mahine" → {"intent": "query_vendor_breakdown", "period": "mtd"}
 - period: "today" | "mtd" | "specific_month"; month: "YYYY-MM" only for specific_month
 
-For query_pnl_detail — user wants the full itemised P&L breakdown after seeing a summary:
+For query_pnl_detail — user wants the full itemised P&L breakdown:
+Standalone (no period) — reuses last P&L context:
 - "detail" → {"intent": "query_pnl_detail"}
 - "detail dikhao" → {"intent": "query_pnl_detail"}
 - "breakdown" → {"intent": "query_pnl_detail"}
 - "breakdown chahiye" → {"intent": "query_pnl_detail"}
-- "full P&L" → {"intent": "query_pnl_detail"}
 - "itemwise" → {"intent": "query_pnl_detail"}
 - "poora dikhao" → {"intent": "query_pnl_detail"}
-NOTE: query_pnl_detail has no period — it reuses the last P&L context.
+With period — resolve directly, no prior context needed:
+- "detailed P&L for this month" → {"intent": "query_pnl_detail", "period": "mtd"}
+- "full P&L this month" → {"intent": "query_pnl_detail", "period": "mtd"}
+- "show me detailed PnL for May 2026" → {"intent": "query_pnl_detail", "period": "specific_month", "month": "2026-05"}
+- "itemwise PnL for March" → {"intent": "query_pnl_detail", "period": "specific_month", "month": "2026-03"}
+- "poora PnL dikhao is mahine ka" → {"intent": "query_pnl_detail", "period": "mtd"}
+- "detailed P&L aaj ka" → {"intent": "query_pnl_detail", "period": "today"}
+- "complete breakdown for yesterday" → {"intent": "query_pnl_detail", "period": "yesterday"}
+- period: "today" | "yesterday" | "mtd" | "specific_month"
+- month: "YYYY-MM" — only when period = "specific_month"
+NOTE: When period is present, resolve directly. When absent, reuse the last pnl_context.
 
 For query_upload_history — user asks about recently uploaded bills or their contents:
 - "last BigBasket bill" → {"intent": "query_upload_history", "vendor_filter": "bigbasket", "target": "last"}
