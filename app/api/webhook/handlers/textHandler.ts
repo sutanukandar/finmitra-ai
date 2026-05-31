@@ -32,11 +32,12 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
         if (category === 'sales' || category === 'revenue' || category.includes('bika')) {
           pnlEntry.sales = entry.amount || 0;
-        } else if (category === 'hyperpure' || category.includes('zomato')) {
+        } else if (category === 'hyperpure') {
           pnlEntry.hyperpure = entry.amount || 0;
         } else if (category === 'bigbasket' || category.includes('big basket') || category.includes('bbnow')) {
           pnlEntry.bigbasket = entry.amount || 0;
         } else {
+          // swiggy, zomato, milk, bread, water, phonepe, rent, etc. map directly
           pnlEntry[category] = entry.amount || 0;
         }
 
@@ -51,9 +52,10 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         if (dupCheck.isDuplicate || dupCheck.csvExists) {
           console.log(`[TextHandler] Duplicate detected: ${pnlColumn} ₹${entry.amount} on ${finalDate} (csvExists=${dupCheck.csvExists})`);
 
-          const existing  = dupCheck.existingAmount || 0;
-          const newAmount = entry.amount || 0;
-          const dateLabel = formatDate(finalDate);
+          const existing     = dupCheck.existingAmount || 0;
+          const newAmount    = entry.amount || 0;
+          const dateLabel    = formatDate(finalDate);
+          const displayName  = pnlColumn.charAt(0).toUpperCase() + pnlColumn.slice(1);
 
           await dataService.createPendingConfirmation(
             restaurantId,
@@ -61,23 +63,31 @@ export async function handleTextMessage(from: string, restaurantId: string, body
             'confirm_text_entry'
           );
 
-          const warnMsg = dupCheck.csvExists
-            ? `⚠️ CSV Already Uploaded for This Date
+          let warnMsg: string;
+          if (dupCheck.csvExists) {
+            warnMsg = `⚠️ CSV Already Uploaded for This Date
 
 You uploaded a PhonePe CSV for ${dateLabel} which already has ₹${existing.toLocaleString('en-IN')} recorded.
 
 Adding ₹${newAmount.toLocaleString('en-IN')} manually will make the total ₹${(existing + newAmount).toLocaleString('en-IN')}.
 
 Only save if this is an additional payment NOT in your CSV.
-Reply *haan* to add anyway · *nahi* to cancel`
-            : `⚠️ Possible Duplicate Entry
+Reply *haan* to add anyway · *nahi* to cancel`;
+          } else if (pnlColumn === 'swiggy' || pnlColumn === 'zomato') {
+            warnMsg = `⚠️ ${displayName} ₹${existing.toLocaleString('en-IN')} already saved for ${dateLabel}.
 
-${pnlColumn} ₹${newAmount} for ${dateLabel}
+If this is a new settlement covering different orders, save anyway.
+Reply *haan* to add ₹${newAmount.toLocaleString('en-IN')} more · *nahi* to cancel`;
+          } else {
+            warnMsg = `⚠️ Possible Duplicate Entry
 
-You already have ${pnlColumn} ₹${existing} saved for this date.
-Saving again will add ₹${newAmount} more (total = ₹${existing + newAmount})
+${displayName} ₹${newAmount.toLocaleString('en-IN')} for ${dateLabel}
+
+You already have ${displayName} ₹${existing.toLocaleString('en-IN')} saved for this date.
+Saving again will add ₹${newAmount.toLocaleString('en-IN')} more (total = ₹${(existing + newAmount).toLocaleString('en-IN')})
 
 Reply *haan* to save anyway · *nahi* to cancel`;
+          }
 
           await sendMessage(from, warnMsg);
 
@@ -87,7 +97,8 @@ Reply *haan* to save anyway · *nahi* to cancel`;
 
         await dataService.accumulatePnlEntry(restaurantId, pnlColumn, finalDate, entry.amount || 0, 'whatsapp');
         console.log(`[TextHandler] Accumulated ${pnlColumn} += ₹${entry.amount} for date ${finalDate}`);
-        await sendMessage(from, `✅ ${pnlColumn} ₹${entry.amount || 0} saved for ${formatDate(finalDate)}`);
+        const displayName = pnlColumn.charAt(0).toUpperCase() + pnlColumn.slice(1);
+        await sendMessage(from, `✅ ${displayName} ₹${(entry.amount || 0).toLocaleString('en-IN')} saved for ${formatDate(finalDate)}`);
         savedCount++;
       }
 

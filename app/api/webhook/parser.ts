@@ -14,11 +14,24 @@ Parse the user message and return ONLY valid JSON (no markdown, no code blocks, 
 Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, help, unknown.
 
 Categories for add_entries:
-- sales / revenue / bika / aaj bika / today sales
-- swiggy, phonepe, hyperpure, bigbasket, milk, bread, water, rent, electricity, gas, salary, fixed
+- sales / revenue / bika / aaj bika / today sales → category: "sales"
+- swiggy / swiggy sales / swiggy revenue / swiggy income / swiggy settlement → category: "swiggy"
+- zomato / zomato sales / zomato revenue / zomato income / zomato settlement → category: "zomato"
+  IMPORTANT: "zomato" means Zomato delivery platform revenue, NOT Hyperpure. Hyperpure bills use category: "hyperpure".
+- phonepe, hyperpure, bigbasket, milk, bread, water, rent, electricity, gas, salary, fixed
 - water / bisleri / drinking water → category: "water"
 
 If the message is about sales/revenue, use category: "sales".
+
+Swiggy and Zomato entry examples:
+- "swiggy 2400 aaj"
+  → {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 2400, "date_offset": 0}]}
+- "zomato 1800 25 May"
+  → {"intent": "add_entries", "entries": [{"category": "zomato", "amount": 1800, "date": "2026-05-25"}]}
+- "swiggy income yesterday 3200"
+  → {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 3200, "date_offset": -1}]}
+- "aaj ka swiggy 1500, zomato 900"
+  → {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 1500, "date_offset": 0}, {"category": "zomato", "amount": 900, "date_offset": 0}]}
 
 Each line of the message may be a separate entry with its own date.
 Parse each line independently and return an array of entries.
