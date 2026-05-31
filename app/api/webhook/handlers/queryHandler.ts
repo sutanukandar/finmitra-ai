@@ -14,8 +14,11 @@ export async function handlePnlQuery(
   parsed?: ParsedIntent
 ) {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // Use IST date — Vercel runs UTC; without offset early-morning queries
+    // return yesterday's date and the wrong day's data
+    const today      = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
     const monthStart = today.slice(0, 7) + '-01';
+    console.log(`[QueryHandler] intent=${parsed?.intent} period=${parsed?.period} today(IST)=${today}`);
 
     // ── query_specific: multi-month comparison ───────────────────────────
     if (parsed?.intent === 'query_specific' &&
@@ -484,25 +487,30 @@ ${vendorLines}`
       endDate     = new Date(y, m, 0).toISOString().split('T')[0];
       periodLabel = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
     } else if (parsed?.intent === 'query_pnl' && parsed.period === 'yesterday') {
-      startDate   = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      startDate   = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
+      endDate     = startDate;
       periodLabel = 'Yesterday';
-    } else if (parsed?.intent === 'query_mtd' || parsed?.intent === 'query_pnl' && parsed.period === 'mtd' ||
+    } else if (parsed?.intent === 'query_mtd' ||
+               (parsed?.intent === 'query_pnl' && parsed.period === 'mtd') ||
                body.includes('this month') || body.includes('month')) {
       startDate   = monthStart;
       endDate     = today;
-      periodLabel = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      periodLabel = `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
     } else if (body.includes('kal') || body.includes('yesterday')) {
-      startDate   = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      startDate   = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
+      endDate     = startDate;
       periodLabel = 'Yesterday';
     } else if (body.includes('aaj') || body.includes('today') || body.includes('p&l') ||
                parsed?.intent === 'query_today' || parsed?.intent === 'query_pnl') {
       startDate   = today;
+      endDate     = today;
       periodLabel = 'Today';
     } else {
       await sendMessage(from, "Please specify period like `aaj ka P&L`, `this month`, or `P&L for Mar 2026`");
       return;
     }
 
+    console.log(`[QueryHandler] P&L query startDate=${startDate} endDate=${endDate} label=${periodLabel}`);
     const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
 
     if (error || !entries || entries.length === 0) {
