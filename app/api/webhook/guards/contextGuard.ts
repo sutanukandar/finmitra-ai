@@ -24,11 +24,12 @@ export function isInContext(message: string): boolean {
     // P&L
     'p&l', 'pnl', 'profit', 'loss', 'margin', 'cogs',
     'balance', 'summary', 'report', 'hisaab', 'hisab',
-    // Queries
-    'kitna', 'how much', 'total', 'daily', 'weekly', 'monthly',
-    'march', 'april', 'may', 'june', 'july', 'august',
-    'last month', 'this month', 'last week',
-    'aaj', 'kal', 'today', 'yesterday',
+    // Queries — only explicitly financial time references; generic words
+    // like 'today', 'yesterday', 'how much', 'total', 'daily' removed to
+    // avoid false passes on unrelated questions (e.g. "IPL score yesterday")
+    'kitna', 'last month', 'this month',
+    'march', 'april', 'june', 'july', 'august',
+    'september', 'october', 'november', 'december', 'january', 'february',
     // Actions
     'save', 'add', 'update', 'upload', 'entry',
     // Items

@@ -60,7 +60,13 @@ unrelated to the restaurant's finances.`,
 
   if (answer === 'OUT_OF_SCOPE') {
     await sendMessage(from,
-      "I can only help with your restaurant's finances.\nTry asking about your P&L, expenses, or sales."
+      "Hi! I'm FinMitra — your restaurant's finance assistant 🧾\n\n" +
+      "I can help you with:\n" +
+      "• Saving daily expenses (milk, bread, water)\n" +
+      "• Recording sales (PhonePe, Swiggy, Zomato)\n" +
+      "• Uploading bills (BigBasket, Hyperpure, DMart)\n" +
+      "• P&L summaries and expense queries\n\n" +
+      "Try: _aaj ka P&L_ or _today sales 3500_"
     );
     return;
   }
