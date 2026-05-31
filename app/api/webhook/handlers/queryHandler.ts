@@ -7,6 +7,24 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const FIXED_COLUMNS = [
+  { key: 'rent',        label: 'Rent' },
+  { key: 'salary',      label: 'Salary' },
+  { key: 'electricity', label: 'Electricity' },
+  { key: 'gas',         label: 'Gas' },
+  { key: 'pg',          label: 'Staff PG' },
+  { key: 'internet',    label: 'Internet' },
+  { key: 'garbage',     label: 'Garbage' },
+  { key: 'repairs',     label: 'Repairs' },
+  { key: 'marketing',   label: 'Marketing' },
+  { key: 'misc',        label: 'Misc' },
+  { key: 'fixed',       label: 'Fixed' },
+] as const;
+
+const FIXED_THRESHOLD = 2000;
+
+const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
+
 export async function handlePnlQuery(
   from: string,
   restaurantId: string,
@@ -32,7 +50,7 @@ export async function handlePnlQuery(
 
       const { data: entries } = await supabase
         .from('pnl_entries')
-        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas')
+        .select(PNL_SELECT)
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate);
@@ -53,8 +71,9 @@ export async function handlePnlQuery(
         byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
                                (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                                (Number(e.water) || 0) + (Number(e.other) || 0);
-        byMonth[mo].fixed   += (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
-                               (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
+        byMonth[mo].fixed   += FIXED_COLUMNS.reduce(
+          (s, { key }) => s + (Number(e[key]) || 0), 0
+        );
       });
 
       const lines = parsed.months.map((mo: string) => {
@@ -124,29 +143,25 @@ export async function handlePnlQuery(
 
       let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
       let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
-      let rent = 0, electricity = 0, salary = 0, fixed = 0, gas = 0;
 
       entries.forEach((e: any) => {
-        sales      += e.sales       || 0;
-        swiggy     += e.swiggy      || 0;
-        zomato     += e.zomato      || 0;
-        phonepe    += e.phonepe     || 0;
-        hyperpure  += e.hyperpure   || 0;
-        bigbasket  += e.bigbasket   || 0;
-        milk       += e.milk        || 0;
-        bread      += e.bread       || 0;
-        water      += e.water       || 0;
-        other      += e.other       || 0;
-        rent       += e.rent        || 0;
-        electricity+= e.electricity || 0;
-        salary     += e.salary      || 0;
-        fixed      += e.fixed       || 0;
-        gas        += e.gas         || 0;
+        sales     += e.sales     || 0;
+        swiggy    += e.swiggy    || 0;
+        zomato    += e.zomato    || 0;
+        phonepe   += e.phonepe   || 0;
+        hyperpure += e.hyperpure || 0;
+        bigbasket += e.bigbasket || 0;
+        milk      += e.milk      || 0;
+        bread     += e.bread     || 0;
+        water     += e.water     || 0;
+        other     += e.other     || 0;
       });
 
       const revenue    = sales + swiggy + zomato + phonepe;
       const cogs       = hyperpure + bigbasket + milk + bread + water + other;
-      const fixedTotal = rent + electricity + salary + fixed + gas;
+      const fixedTotal = (entries as any[]).reduce(
+        (s, e) => s + FIXED_COLUMNS.reduce((fs, { key }) => fs + (Number(e[key]) || 0), 0), 0
+      );
 
       let reply: string;
 
@@ -466,7 +481,7 @@ ${vendorLines.join('\n')}`
 
       const { data: entries } = await supabase
         .from('pnl_entries')
-        .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas')
+        .select(PNL_SELECT)
         .eq('restaurant_id', restaurantId)
         .gte('date', startDate)
         .lte('date', endDate)
@@ -488,8 +503,7 @@ ${vendorLines.join('\n')}`
                  (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                  (Number(e.water) || 0) + (Number(e.other) || 0);
         if (metric === 'fixed')
-          return (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
-                 (Number(e.salary) || 0) + (Number(e.fixed) || 0) + (Number(e.gas) || 0);
+          return FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
         return Number(e[metric]) || 0;
       };
 
@@ -632,33 +646,35 @@ ${vendorLines.join('\n')}`
 
     let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
     let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
-    let rent = 0, salary = 0, electricity = 0, gas = 0, fixedAmt = 0;
 
     entries.forEach((e: any) => {
-      sales      += e.sales      || 0;
-      swiggy     += e.swiggy     || 0;
-      zomato     += e.zomato     || 0;
-      phonepe    += e.phonepe    || 0;
-      hyperpure  += e.hyperpure  || 0;
-      bigbasket  += e.bigbasket  || 0;
-      milk       += e.milk       || 0;
-      bread      += e.bread      || 0;
-      water      += e.water      || 0;
-      other      += e.other      || 0;
-      rent       += e.rent       || 0;
-      salary     += e.salary     || 0;
-      electricity+= e.electricity|| 0;
-      gas        += e.gas        || 0;
-      fixedAmt   += e.fixed      || 0;
+      sales     += e.sales     || 0;
+      swiggy    += e.swiggy    || 0;
+      zomato    += e.zomato    || 0;
+      phonepe   += e.phonepe   || 0;
+      hyperpure += e.hyperpure || 0;
+      bigbasket += e.bigbasket || 0;
+      milk      += e.milk      || 0;
+      bread     += e.bread     || 0;
+      water     += e.water     || 0;
+      other     += e.other     || 0;
     });
 
-    const revenue    = sales + swiggy + zomato + phonepe;
-    const cogs       = hyperpure + bigbasket + milk + bread + water + other;
-    const fixedTotal = rent + salary + electricity + gas + fixedAmt;
+    // Aggregate all fixed columns
+    const fixedTotals: Record<string, number> = {};
+    FIXED_COLUMNS.forEach(({ key }) => {
+      fixedTotals[key] = (entries as any[]).reduce(
+        (s, e) => s + (Number(e[key]) || 0), 0
+      );
+    });
+
+    const revenue     = sales + swiggy + zomato + phonepe;
+    const cogs        = hyperpure + bigbasket + milk + bread + water + other;
+    const fixedTotal  = FIXED_COLUMNS.reduce((s, { key }) => s + fixedTotals[key], 0);
     const grossProfit = revenue - cogs;
     const netProfit   = grossProfit - fixedTotal;
 
-    // Only show line items that have a non-zero value
+    // Revenue lines
     const qrSales = phonepe + sales;
     const revLines: string[] = [];
     revLines.push(`Sales (QR/Online) : ₹${qrSales.toLocaleString('en-IN')}`);
@@ -673,17 +689,27 @@ ${vendorLines.join('\n')}`
     if (water)     cogsLines.push(`Water      : ₹${water.toLocaleString('en-IN')}`);
     if (other)     cogsLines.push(`Other      : ₹${other.toLocaleString('en-IN')}`);
 
+    // Fixed lines: show individually if >= threshold, club the rest as "Others"
     const fixedLines: string[] = [];
-    if (rent)        fixedLines.push(`Rent       : ₹${rent.toLocaleString('en-IN')}`);
-    if (salary)      fixedLines.push(`Salary     : ₹${salary.toLocaleString('en-IN')}`);
-    if (electricity) fixedLines.push(`Electricity: ₹${electricity.toLocaleString('en-IN')}`);
-    if (gas)         fixedLines.push(`Gas        : ₹${gas.toLocaleString('en-IN')}`);
-    if (fixedAmt)    fixedLines.push(`Fixed      : ₹${fixedAmt.toLocaleString('en-IN')}`);
+    const aboveThreshold = FIXED_COLUMNS.filter(({ key }) => fixedTotals[key] >= FIXED_THRESHOLD);
+    const belowThreshold = FIXED_COLUMNS.filter(({ key }) => fixedTotals[key] > 0 && fixedTotals[key] < FIXED_THRESHOLD);
+
+    aboveThreshold.forEach(({ key, label }) => {
+      fixedLines.push(`${label.padEnd(12)}: ₹${fixedTotals[key].toLocaleString('en-IN')}`);
+    });
+
+    if (belowThreshold.length > 0) {
+      const othersTotal     = belowThreshold.reduce((s, { key }) => s + fixedTotals[key], 0);
+      const othersBreakdown = belowThreshold
+        .map(({ label, key }) => `${label} ₹${fixedTotals[key].toLocaleString('en-IN')}`)
+        .join(', ');
+      fixedLines.push(`Others      : ₹${othersTotal.toLocaleString('en-IN')} _(${othersBreakdown})_`);
+    }
 
     const replyParts: string[] = [`📊 *P&L Summary — ${periodLabel}*`];
 
     replyParts.push(
-      `\n💰 *Revenue*\n${revLines.length ? revLines.join('\n') : '(none)'}\n*Total     : ₹${revenue.toLocaleString('en-IN')}*`
+      `\n💰 *Revenue*\n${revLines.join('\n')}\n*Total     : ₹${revenue.toLocaleString('en-IN')}*`
     );
     replyParts.push(
       `\n🛒 *COGS*\n${cogsLines.length ? cogsLines.join('\n') : '(none)'}\n*Total     : ₹${cogs.toLocaleString('en-IN')}*`

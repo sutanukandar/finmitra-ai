@@ -20,6 +20,12 @@ Categories for add_entries:
   IMPORTANT: "zomato" means Zomato delivery platform revenue, NOT Hyperpure. Hyperpure bills use category: "hyperpure".
 - phonepe, hyperpure, bigbasket, milk, bread, water, rent, electricity, gas, salary, fixed
 - water / bisleri / drinking water → category: "water"
+- pg / staff pg / boys pg / accommodation / hostel → category: "pg"
+- internet / wifi / broadband / jio / airtel broadband → category: "internet"
+- garbage / waste / dustbin / cleaning charge → category: "garbage"
+- repair / repairs / maintenance / service charge / amc → category: "repairs"
+- marketing / ads / advertisement / promotion / zomato ad → category: "marketing"
+- misc / miscellaneous / other fixed / sundry → category: "misc"
 
 If the message is about sales/revenue, use category: "sales".
 

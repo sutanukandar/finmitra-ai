@@ -37,11 +37,18 @@ function parseAnyDate(raw: any): string | null {
 
 function mapFixedItem(item: string): string {
   const v = item.toLowerCase();
-  if (v.includes('rent')) return 'rent';
-  if (v.includes('salary') || v.includes('wages') || v.includes('arup') || v.includes('staff')) return 'salary';
-  if (v.includes('electricity') || v.includes('electric') || v.includes(' eb') || v.includes('current') || v.includes('bescom')) return 'electricity';
-  if (v.includes('gas') || v.includes('lpg') || v.includes('cylinder')) return 'gas';
-  return 'fixed';
+  if (v.includes('rent'))                                                          return 'rent';
+  if (v.includes('salary') || v.includes('wages') || v.includes('arup') ||
+      v.includes('staff'))                                                         return 'salary';
+  if (v.includes('electricity') || v.includes('electric') || v.includes(' eb') ||
+      v.includes('bescom') || v.includes('current'))                              return 'electricity';
+  if (v.includes('gas') || v.includes('lpg') || v.includes('cylinder'))           return 'gas';
+  if (v.includes('pg') || v.includes('accommodation') || v.includes('hostel'))    return 'pg';
+  if (v.includes('internet') || v.includes('wifi') || v.includes('broadband'))    return 'internet';
+  if (v.includes('garbage') || v.includes('waste') || v.includes('cleaning'))     return 'garbage';
+  if (v.includes('repair') || v.includes('maintenance') || v.includes('amc'))     return 'repairs';
+  if (v.includes('marketing') || v.includes('ads') || v.includes('promotion'))    return 'marketing';
+  return 'misc';
 }
 
 function mapVariableItem(item: string): string {
