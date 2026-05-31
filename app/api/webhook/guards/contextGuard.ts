@@ -30,6 +30,9 @@ export function isInContext(message: string): boolean {
     'kitna', 'last month', 'this month',
     'march', 'april', 'june', 'july', 'august',
     'september', 'october', 'november', 'december', 'january', 'february',
+    // Questions about bills/uploads
+    'item', 'items', 'list', 'ordered', 'order', 'bought',
+    'purchased', 'receipt', 'last', 'recent', 'when', 'which', 'what',
     // Actions
     'save', 'add', 'update', 'upload', 'entry',
     // Items

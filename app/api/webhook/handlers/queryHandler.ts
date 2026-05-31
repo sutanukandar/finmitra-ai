@@ -476,6 +476,76 @@ ${vendorLines}`
       return;
     }
 
+    // ── query_upload_history: last bill or list of recent uploads ────────
+    if (parsed?.intent === 'query_upload_history') {
+      const vendor = parsed.vendor_filter || null;
+      const target = parsed.target || 'last';
+      const limit  = target === 'last' ? 1 : (parsed.limit || 5);
+
+      let query = supabase
+        .from('upload_records')
+        .select('id, date, amount, pnl_field, created_at, metadata')
+        .eq('restaurant_id', restaurantId);
+
+      if (vendor) query = (query as any).eq('pnl_field', vendor);
+
+      const { data: records } = await (query as any)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (!records || records.length === 0) {
+        const vendorLabel = vendor
+          ? vendor.charAt(0).toUpperCase() + vendor.slice(1)
+          : '';
+        await sendMessage(from, `No ${vendorLabel} uploads found.`);
+        return;
+      }
+
+      if (target === 'last') {
+        const r         = records[0] as any;
+        const vendorLabel = (r.pnl_field || 'Bill').charAt(0).toUpperCase() + (r.pnl_field || 'bill').slice(1);
+        const billDate  = new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+        });
+        const uploadedAt = new Date(r.created_at).toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+        });
+
+        const { data: items } = await supabase
+          .from('invoice_items')
+          .select('item_name, quantity, unit, amount')
+          .eq('upload_record_id', r.id)
+          .order('amount', { ascending: false })
+          .limit(10);
+
+        let reply =
+          `📋 *Last ${vendorLabel} Bill*\n` +
+          `Bill date : ${billDate}\n` +
+          `Amount    : ₹${Number(r.amount).toLocaleString('en-IN')}\n` +
+          `Uploaded  : ${uploadedAt}`;
+
+        if (items && items.length > 0) {
+          const itemLines = (items as any[])
+            .map(i => `  • ${i.item_name} — ₹${Number(i.amount).toLocaleString('en-IN')}`)
+            .join('\n');
+          reply += `\n\nItems:\n${itemLines}`;
+        }
+
+        await sendMessage(from, reply);
+      } else {
+        const lines = (records as any[]).map((r, i) => {
+          const vLabel = (r.pnl_field || 'Other').charAt(0).toUpperCase() + (r.pnl_field || 'other').slice(1);
+          const uploaded = new Date(r.created_at).toLocaleDateString('en-IN', {
+            day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
+          });
+          return `${i + 1}. ${vLabel} — ₹${Number(r.amount).toLocaleString('en-IN')} (${uploaded})`;
+        });
+        await sendMessage(from, `📋 *Recent Uploads*\n\n${lines.join('\n')}`);
+      }
+      return;
+    }
+
     // ── full P&L summary (query_today / query_mtd / query_pnl) ──────────
     let startDate = today;
     let endDate: string | undefined;

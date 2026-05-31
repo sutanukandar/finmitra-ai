@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_freeform, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, query_freeform, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales → category: "sales"
@@ -200,6 +200,16 @@ For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "supplier wise kharch in Mar 26" → {"intent": "query_vendor_breakdown", "period": "specific_month", "month": "2026-03"}
 - "kitna kharcha kiya har vendor pe is mahine" → {"intent": "query_vendor_breakdown", "period": "mtd"}
 - period: "today" | "mtd" | "specific_month"; month: "YYYY-MM" only for specific_month
+
+For query_upload_history — user asks about recently uploaded bills or their contents:
+- "last BigBasket bill" → {"intent": "query_upload_history", "vendor_filter": "bigbasket", "target": "last"}
+- "last Hyperpure bill uploaded" → {"intent": "query_upload_history", "vendor_filter": "hyperpure", "target": "last"}
+- "last bill uploaded" → {"intent": "query_upload_history", "vendor_filter": null, "target": "last"}
+- "what items were in the last BigBasket bill" → {"intent": "query_upload_history", "vendor_filter": "bigbasket", "target": "last"}
+- "show me recent bills" → {"intent": "query_upload_history", "vendor_filter": null, "target": "list"}
+- "which bills were uploaded this month" → {"intent": "query_upload_history", "vendor_filter": null, "target": "list"}
+- vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
+- target: "last" (show most recent upload with full item list) | "list" (show recent 5 uploads)
 
 Freeform fallback — use ONLY if the message is clearly a question about the restaurant's financial data (expenses, revenue, trends, comparisons, patterns) but does NOT match any of the structured intents above:
 {"intent": "query_freeform", "question": "<verbatim user message>"}
