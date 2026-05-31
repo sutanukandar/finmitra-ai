@@ -8,6 +8,9 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
     const pending = await dataService.getPendingConfirmation(restaurantId);
     const action  = pending?.action || '';
 
+    // pnl_context is read-only context — never a haan/nahi confirmation
+    if (action === 'pnl_context') return false;
+
     // ── delete_pick: numeric selection (1 / 2 / 3) ───────────────────────
     if (action === 'delete_pick' && /^[123]$/.test(lowerBody)) {
       const idx    = parseInt(lowerBody) - 1;

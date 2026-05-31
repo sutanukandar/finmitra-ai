@@ -3,7 +3,7 @@
 // =============================================
 
 export interface ParsedIntent {
-  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_pnl' | 'query_items' | 'query_ingredient' | 'query_vendor_breakdown' | 'query_daily_breakdown' | 'query_upload_history' | 'query_freeform' | 'help' | 'unknown';
+  intent: 'add_entries' | 'query_today' | 'query_mtd' | 'query_lastmonth' | 'query_specific' | 'query_pnl' | 'query_pnl_detail' | 'query_items' | 'query_ingredient' | 'query_vendor_breakdown' | 'query_daily_breakdown' | 'query_upload_history' | 'query_freeform' | 'help' | 'unknown';
   entries?: Array<{
     category: string;
     amount: number;

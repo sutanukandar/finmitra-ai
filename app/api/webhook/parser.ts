@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, query_freeform, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_pnl_detail, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, query_freeform, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales → category: "sales"
@@ -206,6 +206,16 @@ For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "supplier wise kharch in Mar 26" → {"intent": "query_vendor_breakdown", "period": "specific_month", "month": "2026-03"}
 - "kitna kharcha kiya har vendor pe is mahine" → {"intent": "query_vendor_breakdown", "period": "mtd"}
 - period: "today" | "mtd" | "specific_month"; month: "YYYY-MM" only for specific_month
+
+For query_pnl_detail — user wants the full itemised P&L breakdown after seeing a summary:
+- "detail" → {"intent": "query_pnl_detail"}
+- "detail dikhao" → {"intent": "query_pnl_detail"}
+- "breakdown" → {"intent": "query_pnl_detail"}
+- "breakdown chahiye" → {"intent": "query_pnl_detail"}
+- "full P&L" → {"intent": "query_pnl_detail"}
+- "itemwise" → {"intent": "query_pnl_detail"}
+- "poora dikhao" → {"intent": "query_pnl_detail"}
+NOTE: query_pnl_detail has no period — it reuses the last P&L context.
 
 For query_upload_history — user asks about recently uploaded bills or their contents:
 - "last BigBasket bill" → {"intent": "query_upload_history", "vendor_filter": "bigbasket", "target": "last"}

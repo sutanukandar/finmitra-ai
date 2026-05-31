@@ -602,6 +602,34 @@ ${vendorLines.join('\n')}`
       return;
     }
 
+    // ── query_pnl_detail: full breakdown using saved pnl_context ─────────
+    if (parsed?.intent === 'query_pnl_detail') {
+      const { data: ctxRow } = await supabase
+        .from('pending_confirmations')
+        .select('payload')
+        .eq('restaurant_id', restaurantId)
+        .eq('action', 'pnl_context')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const ctx          = ctxRow?.payload as any;
+      const detailStart  = ctx?.startDate  || today;
+      const detailEnd    = ctx?.endDate    || today;
+      const detailLabel  = ctx?.periodLabel || 'Today';
+
+      const { data: detailEntries } = await dataService.getPnlData(restaurantId, detailStart, detailEnd);
+
+      if (!detailEntries || detailEntries.length === 0) {
+        await sendMessage(from, "No data found for this period yet.");
+        return;
+      }
+
+      await sendMessage(from, buildPnlBreakdown(detailEntries, detailLabel));
+      return;
+    }
+
     // ── full P&L summary (query_today / query_mtd / query_pnl) ──────────
     let startDate = today;
     let endDate: string | undefined;
@@ -644,89 +672,109 @@ ${vendorLines.join('\n')}`
       return;
     }
 
-    let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
-    let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
+    // Compute totals for Level 1 summary
+    const totals = computePnlTotals(entries);
 
-    entries.forEach((e: any) => {
-      sales     += e.sales     || 0;
-      swiggy    += e.swiggy    || 0;
-      zomato    += e.zomato    || 0;
-      phonepe   += e.phonepe   || 0;
-      hyperpure += e.hyperpure || 0;
-      bigbasket += e.bigbasket || 0;
-      milk      += e.milk      || 0;
-      bread     += e.bread     || 0;
-      water     += e.water     || 0;
-      other     += e.other     || 0;
-    });
+    // Save context so "detail" can fetch the same period
+    await dataService.createPendingConfirmation(restaurantId, {
+      startDate, endDate: endDate || startDate, periodLabel
+    }, 'pnl_context');
 
-    // Aggregate all fixed columns
-    const fixedTotals: Record<string, number> = {};
-    FIXED_COLUMNS.forEach(({ key }) => {
-      fixedTotals[key] = (entries as any[]).reduce(
-        (s, e) => s + (Number(e[key]) || 0), 0
-      );
-    });
+    const profit = totals.revenue - totals.cogs - totals.fixedTotal;
+    const profitLine = profit >= 0
+      ? `💵 *Profit   : ₹${Math.round(profit).toLocaleString('en-IN')}*`
+      : `🔴 *Loss     : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`;
 
-    const revenue     = sales + swiggy + zomato + phonepe;
-    const cogs        = hyperpure + bigbasket + milk + bread + water + other;
-    const fixedTotal  = FIXED_COLUMNS.reduce((s, { key }) => s + fixedTotals[key], 0);
-    const grossProfit = revenue - cogs;
-    const netProfit   = grossProfit - fixedTotal;
+    const summary =
+      `📊 *P&L — ${periodLabel}*\n\n` +
+      `Total Sales  : ₹${Math.round(totals.revenue).toLocaleString('en-IN')}\n` +
+      `Item Cost    : ₹${Math.round(totals.cogs).toLocaleString('en-IN')}\n` +
+      `Fixed Cost   : ₹${Math.round(totals.fixedTotal).toLocaleString('en-IN')}\n\n` +
+      `${profitLine}\n\n` +
+      `_Reply *detail* for full breakdown_`;
 
-    // Revenue lines
-    const qrSales = phonepe + sales;
-    const revLines: string[] = [];
-    revLines.push(`Sales (QR/Online) : ₹${qrSales.toLocaleString('en-IN')}`);
-    if (swiggy) revLines.push(`Swiggy            : ₹${swiggy.toLocaleString('en-IN')}`);
-    if (zomato) revLines.push(`Zomato            : ₹${zomato.toLocaleString('en-IN')}`);
-
-    const cogsLines: string[] = [];
-    if (hyperpure) cogsLines.push(`Hyperpure  : ₹${hyperpure.toLocaleString('en-IN')}`);
-    if (bigbasket) cogsLines.push(`BigBasket  : ₹${bigbasket.toLocaleString('en-IN')}`);
-    if (milk)      cogsLines.push(`Milk       : ₹${milk.toLocaleString('en-IN')}`);
-    if (bread)     cogsLines.push(`Bread      : ₹${bread.toLocaleString('en-IN')}`);
-    if (water)     cogsLines.push(`Water      : ₹${water.toLocaleString('en-IN')}`);
-    if (other)     cogsLines.push(`Other      : ₹${other.toLocaleString('en-IN')}`);
-
-    // Fixed lines: show individually if >= threshold, club the rest as "Others"
-    const fixedLines: string[] = [];
-    const aboveThreshold = FIXED_COLUMNS.filter(({ key }) => fixedTotals[key] >= FIXED_THRESHOLD);
-    const belowThreshold = FIXED_COLUMNS.filter(({ key }) => fixedTotals[key] > 0 && fixedTotals[key] < FIXED_THRESHOLD);
-
-    aboveThreshold.forEach(({ key, label }) => {
-      fixedLines.push(`${label.padEnd(12)}: ₹${fixedTotals[key].toLocaleString('en-IN')}`);
-    });
-
-    if (belowThreshold.length > 0) {
-      const othersTotal     = belowThreshold.reduce((s, { key }) => s + fixedTotals[key], 0);
-      const othersBreakdown = belowThreshold
-        .map(({ label, key }) => `${label} ₹${fixedTotals[key].toLocaleString('en-IN')}`)
-        .join(', ');
-      fixedLines.push(`Others      : ₹${othersTotal.toLocaleString('en-IN')} _(${othersBreakdown})_`);
-    }
-
-    const replyParts: string[] = [`📊 *P&L Summary — ${periodLabel}*`];
-
-    replyParts.push(
-      `\n💰 *Revenue*\n${revLines.join('\n')}\n*Total     : ₹${revenue.toLocaleString('en-IN')}*`
-    );
-    replyParts.push(
-      `\n🛒 *COGS*\n${cogsLines.length ? cogsLines.join('\n') : '(none)'}\n*Total     : ₹${cogs.toLocaleString('en-IN')}*`
-    );
-    replyParts.push(
-      `\n🏢 *Fixed Costs*\n${fixedLines.length ? fixedLines.join('\n') : '(none)'}\n*Total     : ₹${fixedTotal.toLocaleString('en-IN')}*`
-    );
-    replyParts.push(
-      `\n📈 *Gross Profit : ₹${grossProfit.toLocaleString('en-IN')}*\n📉 *Net Profit   : ₹${netProfit.toLocaleString('en-IN')}*`
-    );
-
-    await sendMessage(from, replyParts.join('\n'));
+    await sendMessage(from, summary);
 
   } catch (error) {
     console.error("[QueryHandler] Error:", error);
     await sendMessage(from, "Unable to fetch P&L right now. Please try again.");
   }
+}
+
+function computePnlTotals(entries: any[]) {
+  let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
+  let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
+
+  entries.forEach((e: any) => {
+    sales     += e.sales     || 0;
+    swiggy    += e.swiggy    || 0;
+    zomato    += e.zomato    || 0;
+    phonepe   += e.phonepe   || 0;
+    hyperpure += e.hyperpure || 0;
+    bigbasket += e.bigbasket || 0;
+    milk      += e.milk      || 0;
+    bread     += e.bread     || 0;
+    water     += e.water     || 0;
+    other     += e.other     || 0;
+  });
+
+  const fixedTotals: Record<string, number> = {};
+  FIXED_COLUMNS.forEach(({ key }) => {
+    fixedTotals[key] = entries.reduce((s, e) => s + (Number(e[key]) || 0), 0);
+  });
+
+  const revenue    = sales + swiggy + zomato + phonepe;
+  const cogs       = hyperpure + bigbasket + milk + bread + water + other;
+  const fixedTotal = FIXED_COLUMNS.reduce((s, { key }) => s + fixedTotals[key], 0);
+
+  return { sales, swiggy, zomato, phonepe, hyperpure, bigbasket, milk, bread, water, other,
+           fixedTotals, revenue, cogs, fixedTotal };
+}
+
+function buildPnlBreakdown(entries: any[], periodLabel: string): string {
+  const t = computePnlTotals(entries);
+  const profit = t.revenue - t.cogs - t.fixedTotal;
+
+  const qrSales = t.phonepe + t.sales;
+  const revLines: string[] = [];
+  revLines.push(`QR / Online : ₹${Math.round(qrSales).toLocaleString('en-IN')}`);
+  if (t.swiggy) revLines.push(`Swiggy      : ₹${Math.round(t.swiggy).toLocaleString('en-IN')}`);
+  if (t.zomato) revLines.push(`Zomato      : ₹${Math.round(t.zomato).toLocaleString('en-IN')}`);
+
+  const cogsLines: string[] = [];
+  if (t.hyperpure) cogsLines.push(`Hyperpure   : ₹${Math.round(t.hyperpure).toLocaleString('en-IN')}`);
+  if (t.bigbasket) cogsLines.push(`BigBasket   : ₹${Math.round(t.bigbasket).toLocaleString('en-IN')}`);
+  if (t.milk)      cogsLines.push(`Milk        : ₹${Math.round(t.milk).toLocaleString('en-IN')}`);
+  if (t.bread)     cogsLines.push(`Bread       : ₹${Math.round(t.bread).toLocaleString('en-IN')}`);
+  if (t.water)     cogsLines.push(`Water       : ₹${Math.round(t.water).toLocaleString('en-IN')}`);
+  if (t.other)     cogsLines.push(`Others      : ₹${Math.round(t.other).toLocaleString('en-IN')}`);
+
+  const fixedLines: string[] = [];
+  const above = FIXED_COLUMNS.filter(({ key }) => t.fixedTotals[key] >= FIXED_THRESHOLD);
+  const below = FIXED_COLUMNS.filter(({ key }) => t.fixedTotals[key] > 0 && t.fixedTotals[key] < FIXED_THRESHOLD);
+
+  above.forEach(({ key, label }) => {
+    fixedLines.push(`${label.padEnd(12)}: ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`);
+  });
+  if (below.length > 0) {
+    const othersTotal     = below.reduce((s, { key }) => s + t.fixedTotals[key], 0);
+    const othersBreakdown = below
+      .map(({ label, key }) => `${label} ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`)
+      .join(', ');
+    fixedLines.push(`Others      : ₹${Math.round(othersTotal).toLocaleString('en-IN')} _(${othersBreakdown})_`);
+  }
+
+  const profitLine = profit >= 0
+    ? `💵 *Profit  : ₹${Math.round(profit).toLocaleString('en-IN')}*`
+    : `🔴 *Loss    : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`;
+
+  return [
+    `📊 *P&L Breakdown — ${periodLabel}*`,
+    `\n💰 *Total Sales*\n${revLines.join('\n')}\n*Total      : ₹${Math.round(t.revenue).toLocaleString('en-IN')}*`,
+    `\n🛒 *Item Cost (Raw Materials)*\n${cogsLines.length ? cogsLines.join('\n') : '(none)'}\n*Total      : ₹${Math.round(t.cogs).toLocaleString('en-IN')}*`,
+    `\n🏢 *Fixed Cost*\n${fixedLines.length ? fixedLines.join('\n') : '(none)'}\n*Total      : ₹${Math.round(t.fixedTotal).toLocaleString('en-IN')}*`,
+    `\n${profitLine}`,
+  ].join('\n');
 }
 
 async function sendMessage(to: string, body: string) {
