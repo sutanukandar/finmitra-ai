@@ -6,6 +6,8 @@ import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 import { handleConfirmation } from './handlers/confirmationHandler';
 import { handleDelete } from './handlers/deleteHandler';
+import { isInContext } from './guards/contextGuard';
+import { isRateLimited } from './guards/rateLimiter';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -33,6 +35,28 @@ export async function POST(req: NextRequest) {
 
     if (!restaurant) {
       await sendMessage(from, "Namaste! This number is not registered with FinMitra.");
+      return NextResponse.json({ success: true });
+    }
+
+    // Guard: rate limit (text-only; media bills always processed)
+    if (!mediaUrl && isRateLimited(from)) {
+      await sendMessage(from,
+        "You've sent a lot of messages in the last hour. Please wait a bit before sending more."
+      );
+      return NextResponse.json({ success: true });
+    }
+
+    // Guard: context filter (text-only; media bills always processed)
+    if (!mediaUrl && !isInContext(body)) {
+      await sendMessage(from,
+        "Hi! I'm FinMitra — your restaurant's finance assistant 🧾\n\n" +
+        "I can help you with:\n" +
+        "• Saving daily expenses (milk, bread, water)\n" +
+        "• Recording sales (PhonePe, Swiggy, Zomato)\n" +
+        "• Uploading bills (BigBasket, Hyperpure, DMart)\n" +
+        "• P&L summaries and expense queries\n\n" +
+        "Try: _aaj ka P&L_ or _today sales 3500_"
+      );
       return NextResponse.json({ success: true });
     }
 

@@ -42,7 +42,12 @@ Column meanings:
   Fixed     = rent + electricity + salary + fixed + gas
   Gross profit = Revenue - COGS
   Net profit   = Gross profit - Fixed
-If you cannot answer from the data provided, say so in one sentence.`,
+
+STRICT RULE: Only answer questions about THIS restaurant's financial data.
+If the question is not about the restaurant's expenses, revenue, bills, P&L,
+or operational costs — respond with exactly the word: OUT_OF_SCOPE
+Do not answer general knowledge questions, recipes, news, or anything
+unrelated to the restaurant's finances.`,
     messages: [{
       role: 'user',
       content: `P&L data (last 90 days):\n${JSON.stringify(pnlData)}\n\nQuestion: ${question}`
@@ -50,8 +55,15 @@ If you cannot answer from the data provided, say so in one sentence.`,
   });
 
   const answer = aiResponse.content[0]?.type === 'text'
-    ? aiResponse.content[0].text
+    ? aiResponse.content[0].text.trim()
     : "Sorry, I couldn't process that question.";
+
+  if (answer === 'OUT_OF_SCOPE') {
+    await sendMessage(from,
+      "I can only help with your restaurant's finances.\nTry asking about your P&L, expenses, or sales."
+    );
+    return;
+  }
 
   console.log(`[FreeformHandler] Answer: ${answer.slice(0, 100)}...`);
   await sendMessage(from, `🤖 ${answer}`);
