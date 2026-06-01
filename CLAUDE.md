@@ -1,19 +1,16 @@
 # FinMitra AI — CLAUDE.md
 
-> This file gives Claude Code instant full context of the project.
+> Describes the **actual codebase state as of 31 May 2026**.
+> What exists and works today — not a target design.
 > Read this before making any changes.
-> Last updated: 27 May 2026 — includes full schema redesign from architecture session.
 
 ---
 
 ## 1. What This Product Is
 
-**FinMitra AI** (consumer brand: **Hisaab AI**) is a WhatsApp-native AI CFO for Indian restaurant and cafe owners.
-
-Restaurant owners send bill photos, PDFs, and Hinglish text messages via WhatsApp. FinMitra parses them using Claude Vision, saves structured financial data to Supabase, and replies with a real-time P&L summary.
+**FinMitra AI** (consumer brand: **Hisaab AI**) is a WhatsApp-native AI CFO for Indian restaurant owners. Owners send bill photos, PDFs, and Hinglish text messages via WhatsApp. FinMitra parses them using Claude Vision, saves structured financial data to Supabase, and replies with real-time P&L summaries.
 
 **Pilot customer:** Tea Day Munnekollal, Bengaluru (owner: Sutanu Kandar, +919886962078)
-**Full schema design doc in Notion:** https://www.notion.so/36da4e194e4381538028d985c2db96de
 
 ---
 
@@ -27,6 +24,7 @@ Restaurant owners send bill photos, PDFs, and Hinglish text messages via WhatsAp
 | WhatsApp | Twilio (sandbox: `whatsapp:+14155238886`) |
 | AI | Anthropic Claude (`claude-sonnet-4-6`) |
 | Excel parsing | SheetJS (`xlsx`) |
+| CSV parsing | PapaParse (`papaparse`) |
 | Styling | Tailwind CSS v4 |
 
 ---
@@ -37,354 +35,349 @@ Restaurant owners send bill photos, PDFs, and Hinglish text messages via WhatsAp
 app/
   api/
     webhook/
-      route.ts                  ← Twilio WhatsApp webhook entry point
-      parser.ts                 ← Claude text + Vision parsing
-      types.ts                  ← Shared TypeScript interfaces
+      route.ts                    ← Twilio WhatsApp entry point
+      parser.ts                   ← Claude text intent parsing + Vision bill parsing
+      types.ts                    ← Shared TypeScript interfaces
       handlers/
-        textHandler.ts          ← Text message intent → DB save
-        mediaHandler.ts         ← Bill photo/PDF → parse → confirmation flow
-        confirmationHandler.ts  ← haan/nahi/hata do logic → save/delete
-        queryHandler.ts         ← P&L queries (aaj/kal/MTD/projected)
+        textHandler.ts            ← Text intent → DB save or query dispatch
+        mediaHandler.ts           ← Bill photo/PDF → parse → pending confirmation
+        confirmationHandler.ts    ← haan/nahi/1/2/3 → save or delete
+        queryHandler.ts           ← All P&L + item queries (11 intent types)
+        queryFreeformHandler.ts   ← Layer 2 freeform: second Claude call with 90-day data
+        deleteHandler.ts          ← "hata do" → pick entry → confirm_delete flow
+      guards/
+        contextGuard.ts           ← Keyword allowlist — blocks off-topic messages
+        rateLimiter.ts            ← In-memory 30 msg/hr per phone (resets on cold start)
+      services/
+        dataService.ts            ← OLD STUB — DO NOT USE. Superseded by lib/db/dataService.ts
     backfill/
-      route.ts                  ← Backfill API (JSON manual entry + Excel upload)
+      route.ts                    ← POST: parse a bill file via Claude Vision
+      confirm/route.ts            ← POST: save confirmed bill → upload_records + invoice_items + pnl_entries
+      parse-excel/route.ts        ← POST: parse .xlsx → mapped entries (fixed or variable)
+      parse-csv/route.ts          ← POST: parse PhonePe CSV → daily totals
+      save-entries/route.ts       ← POST: bulk-save entries to pnl_entries via accumulatePnlEntry
+    templates/
+      [type]/route.ts             ← GET: sample Excel downloads (type=pnl or type=invoice)
   backfill/
-    page.tsx                    ← Backfill Wizard UI (manual + Excel upload)
-  page.tsx                      ← Homepage (NOT BUILT — still default boilerplate)
+    page.tsx                      ← Backfill Portal UI (3 tabs: Bills / Expenses / Sales)
+  layout.tsx                      ← Default Next.js layout (title still "Create Next App")
+  page.tsx                        ← Homepage — STILL DEFAULT BOILERPLATE, not built
 
 lib/
   db/
-    dataService.ts              ← ⭐ SINGLE SOURCE OF TRUTH for all Supabase operations
-                                   All modules must import from here. Never call Supabase directly.
+    dataService.ts                ← ⭐ SINGLE SOURCE OF TRUTH for all Supabase operations
+  data/
+    pnlService.ts                 ← UNUSED / STALE helper — missing swiggy/zomato/sales. Do not use.
+
+scripts/
+  backfill-canonical.ts           ← One-time item_canonical backfill script
+
+supabase/
+  migrations/
+    20260527000000_schema_v2.sql              ← Created v2 tables (financial_line_items, daily_pnl, etc.)
+    20260528000001_add_item_canonical.sql     ← item_canonical + unit_normalised + quantity_normalised on invoice_items
+    20260528000002_normalise_vendor_names.sql ← One-time vendor name normalisation on invoice_items
+    20260528000003_pnl_entries_metadata.sql   ← Adds metadata JSONB column to pnl_entries
+    20260531000001_granular_fixed_costs.sql   ← Adds pg/internet/garbage/repairs/marketing/misc to pnl_entries
 ```
 
 ---
 
-## 4. Database Schema — TARGET DESIGN (v2)
+## 4. Actual Database Schema
 
-> ⚠️ The current production DB still uses the OLD schema (pnl_entries, upload_records).
-> The schema below is the TARGET. Migration SQL needs to be written and applied.
-> Do NOT build new features against the old schema. Build against this target.
+**The app reads and writes to the old schema** (`pnl_entries`, `upload_records`, `invoice_items`). The v2 tables (`financial_line_items`, `daily_pnl`, etc.) were created by migration 20260527 but **no application code writes to them yet**.
 
-The schema has 4 tiers. Full design doc: https://www.notion.so/36da4e194e4381538028d985c2db96de
+### `pnl_entries` — the primary working table
 
-### TIER 1 — SOURCE
-
-#### `restaurants`
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | gen_random_uuid() |
-| mobile | text UNIQUE | Format: +91XXXXXXXXXX |
-| name | text | |
-| owner_name | text | |
-| city | text | |
-| role | text | default 'owner' |
-| digest_enabled | bool | Daily WhatsApp digest toggle |
-| timezone | text | default 'Asia/Kolkata' |
-| created_at | timestamptz | |
-
-#### `upload_sources`
-Every bill/photo/PDF/text/voice that arrives. Written immediately on receipt, before parsing. File is NEVER deleted even after voiding.
+One row per `(restaurant_id, date)`. All monetary values are additive — rows are upserted with `ON CONFLICT (restaurant_id, date) DO UPDATE`.
 
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | restaurant_id | uuid FK | → restaurants |
-| source_type | text | `pdf\|photo\|excel\|csv\|text\|voice` |
-| doc_category | text | `invoice\|settlement\|manual\|voice_note` |
-| vendor_raw | text | Raw string from Claude parse |
-| file_url | text | S3/Supabase Storage URL — never deleted |
-| parse_status | text | `pending\|success\|failed\|skipped` |
-| status | text | `active\|voided` |
-| voided_at | timestamptz | Set when owner deletes bill |
-| order_reference | text | Links Hyperpure Bill of Supply + Tax Invoice for same order |
+| date | date | Business date YYYY-MM-DD; part of UNIQUE key |
 | created_at | timestamptz | |
+| updated_at | timestamptz | |
+| **sales** | numeric | Walk-in / cash / card / non-PhonePe revenue |
+| **phonepe** | numeric | PhonePe QR revenue |
+| **swiggy** | numeric | Swiggy delivery revenue or settlement |
+| **zomato** | numeric | Zomato delivery revenue or settlement |
+| **hyperpure** | numeric | Hyperpure food cost (excl. delivery fee) |
+| **bigbasket** | numeric | BigBasket food cost |
+| **milk** | numeric | Milk expense |
+| **bread** | numeric | Bread expense |
+| **water** | numeric | Water/Bisleri expense |
+| **other** | numeric | Unclassified COGS + Hyperpure/BB delivery fees |
+| **rent** | numeric | Shop rent |
+| **electricity** | numeric | Electricity bill |
+| **salary** | numeric | Staff wages |
+| **gas** | numeric | LPG cylinders (variable, not fixed) |
+| **fixed** | numeric | Legacy fixed bucket — use specific columns instead |
+| **pg** | numeric | Staff PG / accommodation |
+| **internet** | numeric | Internet / WiFi |
+| **garbage** | numeric | Garbage / waste collection |
+| **repairs** | numeric | Repairs / maintenance / AMC |
+| **marketing** | numeric | Ads / promotions |
+| **misc** | numeric | Miscellaneous fixed costs |
+| **metadata** | jsonb | Source tracking per column: `{ "phonepe_sources": ["csv","whatsapp"] }` |
 
-### TIER 2 — FINANCIAL EVENTS
-
-#### `financial_line_items` ⭐ THE CORE TABLE
-One row per confirmed financial event (bill, manual entry, rent payment, Swiggy settlement).
+### `invoice_items` — line-item detail from parsed bills
 
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | restaurant_id | uuid FK | |
-| upload_source_id | uuid FK nullable | NULL for manual text entries |
-| entry_date | date | Business date the expense occurred — YYYY-MM-DD |
-| created_at | timestamptz | When it was logged into system (always NOW()) |
-| cost_type | text | `variable\|fixed\|revenue` |
-| category | text | See Category Taxonomy section below |
-| vendor_canonical | text | Normalised via vendor_map |
-| amount | numeric | INR, always positive |
-| channel | text | `swiggy\|zomato\|phonepe\|walkin_cash\|walkin_qr\|dine_in` — for revenue rows |
-| transaction_type | text | `invoice\|credit_note\|debit_note` |
-| is_intercompany | bool | true for Tea Day company → outlet transfers |
-| classification_status | text | `classified\|unclassified\|skipped` |
-| source_text | text | Raw WhatsApp message e.g. "expense 2000" |
-| needs_review | bool | true when category unknown — shows in admin digest |
-| cost_type_inferred | bool | true when cost_type was guessed not confirmed |
-| entry_method | text | `whatsapp_realtime\|whatsapp_backdate\|backfill_excel\|backfill_manual\|system` |
-| deleted_at | timestamptz | Soft delete. NULL = active |
-| deleted_by | text | `owner\|system\|admin` |
-| delete_reason | text | `owner_correction\|duplicate\|test` |
-
-#### `invoice_items`
-Line-by-line item detail for parsed bills. Hangs off financial_line_items.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| line_item_id | uuid FK | → financial_line_items |
-| upload_source_id | uuid FK | → upload_sources. CASCADE DELETE key |
-| entry_date | date | YYYY-MM-DD |
-| item_name | text | Raw name e.g. "Nandini Toned Milk 5L Poly" |
-| item_canonical | text | Normalised e.g. "Toned Milk" |
-| quantity | numeric | |
-| unit | text | Kg, Pc, L, etc. |
-| rate | numeric | Per-unit price. NEVER save as 0. Derive: amount/quantity if not on bill |
+| vendor | text | Normalised name (see `normaliseVendor()` in dataService) |
+| date | date | Bill date |
+| item_name | text | Exact product name from invoice |
+| item_canonical | text | Generic ingredient name set by Claude Vision (e.g. "Carrot") |
+| unit_normalised | text | Kg / L / Pc |
+| quantity_normalised | numeric | Qty in normalised unit |
+| quantity | numeric | Raw quantity |
+| unit | text | Raw unit string |
+| rate | numeric | Per-unit price — never 0; derive `amount/quantity` if missing |
 | amount | numeric | Line total |
+| mapped_category | text | Always `"cogs"` for food items |
+| upload_record_id | uuid FK | → upload_records (populated since 31 May 2026) |
+| metadata | jsonb | `{ invoice_number: "..." }` |
+| line_item_id | uuid FK nullable | → financial_line_items (v2, not yet populated) |
+| upload_source_id | uuid FK nullable | → upload_sources (v2, not yet populated) |
+| entry_date | date | v2 alias for date, not yet populated |
 | tax_amount | numeric | GST if shown |
 | invoice_number | text | |
-| food_category | text | `dairy\|produce\|dry\|protein\|beverage\|packaging\|supplies` |
-| mapped_category | text | `cogs` for food items. NEVER `fixed` for food |
-| deleted_at | timestamptz | Soft deleted when parent bill is deleted |
+| food_category | text | dairy / produce / dry / protein / beverage / packaging / supplies |
+| deleted_at | timestamptz | Soft delete (delete flow not yet wired to this column) |
 
-#### `revenue_entries`
-Revenue is structurally different from costs — separate table.
+### `upload_records` — audit trail for confirmed bill uploads
 
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | restaurant_id | uuid FK | |
-| upload_source_id | uuid FK nullable | |
-| entry_date | date | |
-| channel | text | `swiggy\|zomato\|phonepe\|walkin_cash\|walkin_qr\|dine_in\|catering` |
-| gross_amount | numeric | Before commission |
-| commission | numeric | Platform fee (Swiggy/Zomato ~20-25%) |
-| net_amount | numeric | gross_amount - commission |
-| settlement_date | date | When money hits bank (may differ from entry_date) |
-| order_count | int | |
-| entry_method | text | Same enum as financial_line_items |
-| deleted_at | timestamptz | |
+| date | date | Bill date (not upload time) |
+| doc_type | text | `"invoice"` |
+| source | text | `"whatsapp"` or `"backfill"` |
+| amount | numeric | Full bill total including delivery |
+| pnl_field | text | `"hyperpure"` / `"bigbasket"` / `"other"` |
+| file_url | text | Original Twilio media URL |
+| metadata | jsonb | `{ vendor: "...", delivery_fee: N }` |
+| deleted_at | timestamptz | Soft delete |
+| created_at | timestamptz | When uploaded — used to order `query_upload_history` |
 
-### TIER 3 — AGGREGATION
-
-#### `daily_pnl`
-Computed cache. NEVER manually written. Recomputed on every confirmed save or delete.
-
-| Column | Type | Notes |
-|---|---|---|
-| restaurant_id | uuid FK | |
-| date | date | UNIQUE with restaurant_id |
-| total_revenue | numeric | |
-| total_cogs | numeric | |
-| total_fixed | numeric | |
-| other_expense | numeric | Unclassified expenses bucket |
-| gross_profit | numeric | total_revenue - total_cogs |
-| net_profit | numeric | gross_profit - total_fixed |
-| margin_pct | numeric | gross_profit / total_revenue × 100 |
-| computed_at | timestamptz | When last recomputed |
-
-#### `monthly_item_spend`
-Rolled up from invoice_items. Powers ingredient analytics.
-
-| Column | Type | Notes |
-|---|---|---|
-| restaurant_id | uuid FK | |
-| month | text | YYYY-MM |
-| item_canonical | text | |
-| food_category | text | |
-| total_qty | numeric | |
-| total_spend | numeric | |
-| avg_rate | numeric | total_spend / total_qty |
-| vendor_breakdown | jsonb | e.g. {"Hyperpure": 6300, "BigBasket": 2520} |
-
-UNIQUE on (restaurant_id, month, item_canonical).
-
-### TIER 4 — SUPPORT
-
-#### `vendor_map`
-Maps raw vendor strings → canonical names → P&L columns. Add new vendors here, no code deploy needed.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| vendor_raw | text | e.g. "Hyperpure by Zomato", "BB B2B" |
-| vendor_canonical | text | e.g. "Hyperpure", "BigBasket" |
-| cost_type | text | `variable\|fixed\|revenue` |
-| pnl_column | text | e.g. `hyperpure`, `bigbasket`, `other` |
-| category | text | e.g. `cogs_food_dry`, `cogs_delivery_fee` |
-| confidence_score | numeric | 0.0–1.0. Below 0.7 → ask owner to confirm |
-
-#### `item_canonical_map`
-Normalises vendor-specific item names for cross-vendor comparison.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| item_raw | text | e.g. "Nandini Toned Milk 5L Poly" |
-| item_canonical | text | e.g. "Toned Milk" |
-| food_category | text | dairy, produce, dry, protein, beverage |
-| unit_normalised | text | Standard unit for comparison |
-
-#### `pending_confirmations`
-Temporary. TTL 10 minutes. Cleared on haan/nahi reply.
+### `pending_confirmations` — multi-step state (TTL: 10 min)
 
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | restaurant_id | uuid FK | |
-| payload | jsonb | Full parsed result: vendor, date, total, items[] |
-| action | text | `confirm_bill\|confirm_entry\|confirm_delete` |
-| expires_at | timestamptz | NOW() + 10 minutes |
+| action | text | One of the 5 values below |
+| payload | jsonb | Varies by action |
+| expires_at | timestamptz | now() + 10 minutes |
 | created_at | timestamptz | |
 
-#### `audit_log`
-Append-only. NOTHING is ever deleted from here. GST compliance record.
+**Action values used by the app** (⚠️ the DB migration's CHECK constraint only covers `confirm_bill|confirm_entry|confirm_delete` — the app writes 5 values; verify the constraint allows them all):
+- `confirm_bill` — bill preview waiting for haan/nahi
+- `confirm_text_entry` — duplicate text entry waiting for haan/nahi
+- `confirm_delete` — specific delete entry waiting for haan/nahi
+- `delete_pick` — multiple matches shown, waiting for 1/2/3
+- `pnl_context` — stores `{ startDate, endDate, periodLabel }` for Level 2 P&L; **never a confirmation action** — confirmationHandler returns `false` immediately for this action
 
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid PK | |
-| restaurant_id | uuid FK | |
-| action | text | `save\|delete\|delete_bill\|reclassify\|backdate` |
-| upload_source_id | uuid FK nullable | |
-| line_item_id | uuid FK nullable | |
-| amount_reversed | numeric | For delete actions |
-| item_count_reversed | int | For bill deletes |
-| date_affected | date | Business date whose P&L changed |
-| performed_by | text | `owner\|system\|admin` |
-| performed_at | timestamptz | |
+### `audit_log` — append-only event log
 
----
+| Column | Type |
+|---|---|
+| id | uuid PK |
+| restaurant_id | uuid FK |
+| action | text (save / delete / duplicate_override / backfill / backfill_duplicate_override) |
+| date_affected | date |
+| pnl_field | text |
+| amount_reversed | numeric |
+| item_count_reversed | int |
+| performed_by | text (owner / system / admin) |
+| performed_at | timestamptz |
+| upload_source_id | uuid FK nullable |
+| line_item_id | uuid FK nullable |
 
-## 5. Category Taxonomy
+### `restaurants`
 
-Valid values for `financial_line_items.category`:
+| Column | Type |
+|---|---|
+| id | uuid PK |
+| mobile | text UNIQUE (format: `+91XXXXXXXXXX`) |
+| name | text |
+| owner_name | text |
+| created_at | timestamptz |
 
-```
-REVENUE
-  delivery_swiggy | delivery_zomato | delivery_other
-  walkin_qr | walkin_cash | dine_in | catering
+### V2 tables (exist in DB, no app code uses them yet)
 
-VARIABLE COST (cost_type = 'variable')
-  cogs_food_produce      ← vegetables, fruits
-  cogs_food_dairy        ← milk, paneer, butter, curd
-  cogs_food_dry          ← rice, dal, flour, spices, coffee, tea
-  cogs_food_protein      ← chicken, eggs, fish
-  cogs_beverage          ← juices, cold drinks, soda, water
-  cogs_packaging         ← boxes, bags, cups, straws, napkins
-  cogs_supplies          ← dishwash soap, cleaning materials
-  cogs_fuel              ← LPG gas cylinder (variable NOT fixed)
-  cogs_delivery_fee      ← Hyperpure delivery charges (separate line item on every HP invoice)
-  delivery_commission    ← Swiggy/Zomato platform commission
-  other_expense          ← Unclassified (pending review)
-
-FIXED COST (cost_type = 'fixed')
-  fixed_rent             ← Shop rent (₹20-22k/month)
-  fixed_staff_pg         ← Staff accommodation / PG (₹6,500/month) — NOT same as rent
-  fixed_salary           ← Staff wages
-  fixed_electricity
-  fixed_water
-  fixed_internet
-  fixed_garbage
-  fixed_maintenance
-  fixed_other
-```
-
-**⚠️ Gas = variable (cogs_fuel), NOT fixed.** LPG cylinder scales with usage.
-**⚠️ PG ≠ Rent.** Staff accommodation is `fixed_staff_pg`, shop rent is `fixed_rent`.
+Created by `20260527000000_schema_v2.sql`. No reads or writes from app code:
+- `upload_sources` — planned replacement for `upload_records`
+- `financial_line_items` — planned replacement for `pnl_entries`
+- `revenue_entries` — separate revenue table
+- `daily_pnl` — computed aggregation cache
+- `monthly_item_spend` — ingredient analytics rollup
+- `vendor_map` — seeded with known vendors, but no app code queries it
+- `item_canonical_map` — no app code queries it
 
 ---
 
-## 6. P&L Formula
+## 5. P&L Formula (actual column names)
 
 ```
-Revenue      = SUM of all revenue_entries.net_amount for the date
-COGS         = SUM of financial_line_items WHERE cost_type = 'variable'
-Fixed        = SUM of financial_line_items WHERE cost_type = 'fixed'
+Revenue      = sales + phonepe + swiggy + zomato
+COGS         = hyperpure + bigbasket + milk + bread + water + other
+Fixed        = rent + electricity + salary + gas + fixed
+             + pg + internet + garbage + repairs + marketing + misc
 Gross Profit = Revenue − COGS
 Net Profit   = Gross Profit − Fixed
 Margin %     = Gross Profit / Revenue × 100
 ```
 
-### MTD Query (hits daily_pnl — one fast read):
-```sql
-SELECT SUM(total_revenue), SUM(total_cogs), SUM(total_fixed),
-       SUM(gross_profit), SUM(net_profit)
-FROM daily_pnl
-WHERE restaurant_id = $1
-  AND date >= DATE_TRUNC('month', CURRENT_DATE)
-  AND date <= CURRENT_DATE;
-```
+**Two-level P&L display:**
+- **Level 1** (`query_pnl`): 4-line summary — Total Sales / Item Cost / Fixed Cost / Profit. Also saves `pnl_context` to `pending_confirmations` so Level 2 can reuse the same period.
+- **Level 2** (`query_pnl_detail`): full per-channel revenue, per-vendor COGS, per-line fixed costs. Fixed items ≥ ₹2,000 shown individually; smaller ones clubbed as "Others" (threshold constant `FIXED_THRESHOLD = 2000`).
 
-### Projected P&L (Node.js math, no extra DB call):
-```
-daily_avg_rev  = MTD_revenue / days_with_data
-daily_avg_cogs = MTD_cogs / days_with_data
-projected_rev  = daily_avg_rev × days_in_month
-projected_cogs = daily_avg_cogs × days_in_month
-projected_net  = (projected_rev - projected_cogs) - MTD_fixed
-confidence     = days_with_data / days_in_month × 100
-```
-Use `days_with_data` (actual rows), NOT calendar days. Fixed costs are already fully known — don't project them.
+`query_pnl_detail` resolves dates in two ways:
+1. If `parsed.period` is present — resolves directly (no prior context needed)
+2. If absent — falls back to `pnl_context` from `pending_confirmations`
 
 ---
 
-## 7. Critical Rules — Never Break These
+## 6. WhatsApp Message Flow
 
-1. **Date format:** Always `YYYY-MM-DD` in Supabase. Claude returns `DD-MM-YYYY` — always convert.
-2. **`entry_date` ≠ `created_at`:** `entry_date` = business date. `created_at` = when logged. Always separate.
+```
+POST /api/webhook
+  ↓
+Look up restaurant by mobile in restaurants table
+  ↓
+Guards (text messages only; media always bypasses):
+  • Rate limiter: 30 msg/hr per phone (in-memory Map, resets on Vercel cold start)
+  • Context guard: financial keyword allowlist (see contextGuard.ts)
+  ↓
+Priority dispatch:
+  1. confirmationHandler  — body matches haan/nahi/yes/no/ha/nhi/1/2/3
+     (pnl_context action returns false immediately — never confirmed)
+  2. deleteHandler        — body matches /hata\s*do|hatao|\bdelete\b/i
+  3. mediaHandler         — MediaUrl0 is present
+  4. textHandler          — everything else
+```
+
+### Confirmation flow (bills)
+- Photo/PDF → `mediaHandler` → `parser.parseMedia` → duplicate check (pending + upload_records) → send preview → `createPendingConfirmation('confirm_bill')`
+- `haan` → `confirmationHandler` → `createUploadRecord` → `saveInvoiceItems` → `upsertPnlEntry` (food → vendor column, deliveryFee → `other`) → `writeAuditLog` → delete pending
+- `nahi` → delete pending, nothing saved
+
+### Text entry flow
+- `textHandler` → `parser.parseTextMessage` → `checkDuplicateTextEntry`
+- Duplicate found → `createPendingConfirmation('confirm_text_entry')` → warn user
+- No duplicate → `accumulatePnlEntry` (adds to existing value, tracks source in metadata.`${column}_sources`)
+
+### Delete flow
+- `deleteHandler` — "hata do milk"
+  - Date mentioned → single `confirm_delete` prompt
+  - No date → fetch last 3 entries for that category → `delete_pick` picker (numbered list)
+- `1`/`2`/`3` → `confirmationHandler` re-queues as `confirm_delete`
+- `haan` → `zeroPnlColumn` → `writeAuditLog`
+
+### P&L query flow
+- `textHandler` → `parser.parseTextMessage` → structured intent → `queryHandler`
+- Unknown / unmatched → `queryFreeformHandler` (second Claude call, 90-day data, `OUT_OF_SCOPE` sentinel)
+
+### Delivery fee handling
+- `parser.parseMedia` strips items matching `/delivery|shipping|freight|pay on delivery/i`
+- Returns `delivery_fee` separately from `items[]`
+- On confirm: `foodTotal = total − deliveryFee` → vendor pnl column; `deliveryFee` → accumulates in `other`
+
+---
+
+## 7. Intent Types (types.ts)
+
+```typescript
+intent:
+  'add_entries'            // save text entries to pnl_entries
+  'query_today'            // legacy — handled by query_pnl path
+  'query_mtd'              // legacy — handled by query_pnl path
+  'query_lastmonth'        // legacy — handled by query_pnl path
+  'query_specific'         // single metric: sales/cogs/margins, multi-month support
+  'query_pnl'              // Level 1: 4-line P&L summary for a period
+  'query_pnl_detail'       // Level 2: full itemised breakdown
+  'query_items'            // top ingredients by spend, optional vendor + date filter
+  'query_ingredient'       // single ingredient deep-dive (invoice_items + pnl direct entries)
+  'query_vendor_breakdown' // expense split by vendor from invoice_items
+  'query_daily_breakdown'  // day-by-day values for one metric over a range
+  'query_upload_history'   // recent bill uploads ordered by created_at DESC
+  'query_freeform'         // Layer 2 fallback — second Claude call with 90-day P&L
+  'help'
+  'unknown'
+```
+
+---
+
+## 8. lib/db/dataService.ts — the only DB layer
+
+All modules must import from here. Never call Supabase directly from handlers.
+
+| Method | What it does |
+|---|---|
+| `upsertPnlEntry(restaurantId, entry)` | SET columns in pnl_entries (not additive) |
+| `getPnlData(restaurantId, start, end?)` | fetch pnl_entries rows for a date range |
+| `accumulatePnlEntry(restaurantId, category, date, amount, source?)` | ADD to existing value; tracks source in metadata |
+| `checkDuplicateTextEntry(restaurantId, category, date, amount)` | detects same amount already saved; checks metadata for csv source |
+| `checkDuplicatePending(restaurantId, vendor, date, amount)` | checks pending_confirmations for in-flight duplicate bill (±5% tolerance) |
+| `checkDuplicateBill(restaurantId, vendor, date, amount)` | checks upload_records for already-confirmed bill (±5% tolerance) |
+| `createPendingConfirmation(restaurantId, payload, action)` | insert with 10-min TTL |
+| `getPendingConfirmation(restaurantId)` | latest pending row (any action, ordered by created_at DESC) |
+| `deletePendingConfirmation(restaurantId)` | deletes ALL pending rows for the restaurant |
+| `createUploadRecord(restaurantId, data)` | insert into upload_records, returns `id` |
+| `saveInvoiceItems(restaurantId, vendor, date, items[], uploadRecordId?)` | bulk insert with normalised vendor name |
+| `zeroPnlColumn(restaurantId, category, date)` | sets one column to 0 (used by delete flow) |
+| `writeAuditLog(restaurantId, data)` | append-only audit record |
+| `getTopItemsBySpend(restaurantId, start, end?)` | aggregates invoice_items by item_name (not currently called by queryHandler) |
+
+**`normaliseVendor(raw)`** (internal to dataService): maps Hyperpure/Zomato variants → `"Zomato Hyperpure Private Limited"`, BigBasket variants → `"BigBasket Now"`, DMart variants → `"DMart"`.
+
+---
+
+## 9. Backfill Portal (`/backfill`)
+
+Three-tab React UI at `app/backfill/page.tsx`. **Restaurant ID is hardcoded** — no auth.
+
+| Tab | Sub-tabs | APIs | What it does |
+|---|---|---|---|
+| Bills (PDF/Photo) | — | `/api/backfill` → `/api/backfill/confirm` | Claude Vision parses each file; review table; batch save |
+| Expenses (Excel) | Fixed Costs / Variable+Daily | `/api/backfill/parse-excel` → `/api/backfill/save-entries` | .xlsx with Date/Item/Amount; maps item strings to pnl columns |
+| Sales (CSV) | PhonePe / Swiggy (disabled) | `/api/backfill/parse-csv` → `/api/backfill/save-entries` | PhonePe only; aggregates completed transactions by date |
+
+**Excel fixed cost mapping** (`mapFixedItem` in `parse-excel/route.ts`):
+`rent`, `salary`/wages/arup/staff, `electricity`/bescom/current, `gas`/lpg/cylinder, `pg`/accommodation/hostel, `internet`/wifi/broadband, `garbage`/waste/cleaning, `repairs`/maintenance/amc, `marketing`/ads/promotion → anything else → `misc`
+
+**Excel variable mapping** (`mapVariableItem`):
+milk/doodh → `milk`, bread/bun/pav → `bread`, water/bisleri → `water` → anything else → `other`
+
+**PhonePe CSV**: aggregates rows where `Transaction Status === "COMPLETED"`, grouped by date → `pnl_field: "phonepe"`. Handles `YYYY-MM-DD HH:MM:SS` and `DD/MM/YYYY HH:MM:SS` date formats.
+
+Template downloads: `GET /api/templates/pnl` and `GET /api/templates/invoice` generate sample .xlsx files.
+
+---
+
+## 10. Key Rules — Never Break These
+
+1. **Date format:** Always `YYYY-MM-DD` in Supabase. Claude Vision returns `DD-MM-YYYY` — always convert.
+2. **IST date offset:** Vercel runs UTC. Use `new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]` for today's date in queryHandler. Without this, pre-5:30 AM queries return yesterday's data.
 3. **Single dataService:** All DB calls go through `lib/db/dataService.ts`. Never the old `app/api/webhook/services/dataService.ts`.
-4. **Upsert on daily_pnl:** UNIQUE on `(restaurant_id, date)`. Always `ON CONFLICT DO UPDATE`.
-5. **Never hard-delete:** Every financial row has `deleted_at`. NULL = active. All queries: `WHERE deleted_at IS NULL`.
-6. **Atomic transactions:** save/delete = line item + daily_pnl recompute + audit_log in ONE transaction. Never partial.
-7. **`upload_source_id` is the cascade key:** Bill delete = cascade soft-delete all invoice_items via this FK.
-8. **Never hardcode restaurant IDs.** `b77ed758-9a72-4de2-9138-b353589c656d` is pilot-only temp.
-9. **Twilio media requires Basic Auth:** `Buffer.from('SID:TOKEN').toString('base64')`.
-10. **`mapped_category = 'cogs'` for all food items.** Never `'fixed'` for food.
-11. **`rate` in invoice_items is never 0.** Derive: `amount / quantity` if not on bill.
+4. **pnl_entries upsert:** UNIQUE on `(restaurant_id, date)`. Always `ON CONFLICT DO UPDATE`.
+5. **Accumulate vs set:** Text and backfill entries use `accumulatePnlEntry` (adds to existing). Only use `upsertPnlEntry` (sets/replaces) when you want to overwrite.
+6. **Twilio media requires Basic Auth:** `Buffer.from('SID:TOKEN').toString('base64')`.
+7. **pnl_context is read-only:** `confirmationHandler` returns `false` immediately for `action === 'pnl_context'`. Never treat it as a haan/nahi confirmation.
+8. **Zomato ≠ Hyperpure:** Text entry "zomato 1800" → `pnl_entries.zomato` (revenue). Hyperpure bills come via photo and go to `pnl_entries.hyperpure` (COGS). Never conflate.
+9. **Delivery fees go to `other`:** `foodTotal = total − deliveryFee` → vendor column; `deliveryFee` accumulates in `other`.
+10. **`rate` in invoice_items is never 0.** Claude Vision is instructed to derive `amount / quantity` if rate is not on the bill.
+11. **Duplicate detection has two layers:** (1) `pending_confirmations` check for in-flight duplicate (bill sent twice before confirming); (2) `upload_records` check for already-confirmed bills with ±5% amount tolerance.
+12. **Never hardcode restaurant IDs in new code.** `b77ed758-9a72-4de2-9138-b353589c656d` appears only in legacy backfill UI and migration backfill SQL.
 
 ---
 
-## 8. WhatsApp Flow
-
-```
-User sends message
-  → route.ts reads formData (From, Body, MediaUrl0, MediaContentType0)
-  → Look up restaurant by mobile
-  → Priority:
-      1. 'haan'/'nahi'/'hata do'  → confirmationHandler
-      2. MediaUrl0 present         → mediaHandler → parser.parseMedia → pending_confirmations
-      3. Text message              → textHandler → parser.parseTextMessage → financial_line_items
-```
-
-### Confirmation flow (bills):
-- Upload → parsed → `pending_confirmations` → preview sent
-- `haan` → save to `invoice_items` + `financial_line_items` + recompute `daily_pnl` → delete confirmation
-- `nahi` → delete confirmation, nothing saved
-
-### Delete flow (`hata do`):
-- Find entry by vendor + date in `financial_line_items`
-- Show impact preview: "Deleting ₹X will change [date] net profit from ₹Y → ₹Z"
-- `haan hata do` → soft-delete line_items + invoice_items + void upload_source + reverse daily_pnl + write audit_log (all in one transaction)
-- If multiple matches → show numbered list, ask which one
-
-### Unclassified expense flow ("expense 2000" / "kharch 500"):
-- Save with `classification_status = 'unclassified'`, `needs_review = true`
-- Update `daily_pnl.other_expense` immediately — P&L never blocked
-- Send one 5-option clarification: "1→ Vegetables, 2→ Dairy, 3→ Gas, 4→ Staff, 5→ Skip"
-- If >₹5,000 single entry → ask fixed vs variable first
-- Weekly digest shows total unclassified amount
-
-### Backdated entry flow ("parso sales 3500 tha"):
-- Resolve date: kal=-1, parso=-2, "N din pehle"=-N, "last Monday"=most recent Monday
-- Reject future dates immediately
-- Check if entry exists for that date+category → ask "badlo" (replace) or "jodo" (add)
-- If crossing month boundary → warn before saving
-- Set `entry_method = 'whatsapp_backdate'`
-
----
-
-## 9. Environment Variables
+## 11. Environment Variables
 
 ```env
 ANTHROPIC_API_KEY=
@@ -392,91 +385,78 @@ TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 SUPABASE_URL=               # https://nqjhlzztsaxnzzmkokoj.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=  # Server only — bypasses RLS
-SUPABASE_ANON_KEY=          # Client side — respects RLS
+SUPABASE_ANON_KEY=          # Client side — respects RLS (not currently used)
 JWT_SECRET=
 MSG91_KEY=
 ```
 
 ---
 
-## 10. What's Built vs Not Built
+## 12. What's Built and Working
 
-### ✅ Complete
-- Webhook module (text + media + confirmation handlers)
-- Claude text parsing (`parseTextMessage`)
-- Claude Vision media parsing (`parseMedia` — fixed May 2026, was a stub)
-- `MediaContentType0` correctly passed from route.ts to mediaHandler
-- Data Layer (`lib/db/dataService.ts`)
-- Backfill Wizard (manual entry + Excel upload UI + API)
-- Vendor mapping
-
-### ❌ Not Built Yet (P1 priority order)
-1. **Schema migration** — current DB uses old schema (pnl_entries). Needs migration to new 11-table design.
-2. **Auth** — OTP login via MSG91, JWT session. `app/page.tsx` is still default boilerplate.
-3. **Web dashboard** — Upload UI, P&L view, charts, AI insights
-4. **Delete flow** — `/api/entry` DELETE with P&L reversal and audit log
-5. **`upload_sources` writes** — Every confirmed upload must write here (currently not wired)
-6. **`analytics_events` writes** — Not instrumented yet
-7. **Admin dashboard** (`/admin`) — DAU/WAU/MAU, parse success rate, unclassified digest
-8. **queryHandler wired** — exists but not called from route.ts
-9. **MTD + projected P&L queries** — queryHandler needs implementing
+- WhatsApp webhook with full handler chain (text / media / confirmation / delete)
+- Claude text intent parsing — 13 intent types in parser.ts
+- Claude Vision media parsing (`parseMedia` + `parseMediaBase64`) for PDF and image
+- Delivery fee separation from food COGS
+- Two-layer duplicate detection (pending + upload_records, ±5% tolerance)
+- `upload_records` row written on every confirmed bill
+- `invoice_items` with `upload_record_id` FK on every confirmed bill
+- P&L queries: today / yesterday / MTD / specific month / multi-month
+- Two-level P&L: Level 1 (4-line summary) + Level 2 (full breakdown)
+- `query_pnl_detail` with direct period resolution — no prior context required
+- `query_specific`: single metrics, margin %, multi-month comparisons
+- `query_items`: top ingredients by value/weight, vendor + date filtering
+- `query_ingredient`: single ingredient across invoice_items + pnl direct entries
+- `query_vendor_breakdown`: expense split by vendor
+- `query_daily_breakdown`: day-by-day values for any metric (sales sums all revenue columns)
+- `query_upload_history`: recent bill uploads ordered by `created_at`
+- `query_freeform`: second Claude call with 90-day P&L data, `OUT_OF_SCOPE` sentinel
+- Delete flow: "hata do" + single or multi-match picker
+- Context guard: keyword allowlist blocks off-topic messages before token spend
+- Rate limiter: 30 msg/hr per phone (in-memory)
+- Backfill portal: bills (PDF/photo batch), fixed/variable expenses (Excel), PhonePe CSV
+- Template downloads: `/api/templates/pnl` and `/api/templates/invoice`
+- Granular fixed cost columns: pg, internet, garbage, repairs, marketing, misc
+- Fixed cost smart display: items ≥ ₹2,000 shown individually; rest clubbed as "Others"
+- Swiggy and Zomato revenue text entries map to their own pnl columns (not hyperpure)
 
 ---
 
-## 11. Known Issues to Fix
+## 13. What's Not Built Yet
 
-| Issue | File | Priority |
+| Feature | Notes |
+|---|---|
+| Homepage (`app/page.tsx`) | Still default Next.js boilerplate |
+| Auth (OTP + JWT) | `JWT_SECRET` and `MSG91_KEY` defined but unused |
+| Web dashboard | No P&L view, charts, or insights UI |
+| Migration to v2 schema | v2 tables exist in DB but app still reads/writes pnl_entries |
+| Rate limiter persistence | In-memory Map resets on Vercel cold start — needs Redis or Supabase |
+| Swiggy CSV import | Backfill "Sales" tab has Swiggy sub-tab disabled ("Coming Soon") |
+| Admin dashboard | |
+
+---
+
+## 14. Known Issues
+
+| Issue | Location | Impact |
 |---|---|---|
-| `app/page.tsx` is default boilerplate | app/page.tsx | 🔴 High |
-| Old schema in production — migration needed | Supabase | 🔴 High |
-| Restaurant ID hardcoded | app/backfill/page.tsx:13 | 🟠 Medium |
-| queryHandler not called from route.ts | app/api/webhook/route.ts | 🟠 Medium |
-| Duplicate dataService (old in webhook/services/) | app/api/webhook/services/dataService.ts | 🟡 Low |
-| `sendMessage()` duplicated in every handler | 4 handler files | 🟡 Low |
+| Restaurant ID hardcoded | `app/backfill/page.tsx:6` | Backfill portal only works for pilot customer |
+| Homepage is default boilerplate | `app/page.tsx` | Production URL shows "Create Next App" |
+| `lib/data/pnlService.ts` is stale | Revenue formula missing swiggy/zomato/sales columns | Do not use — safe to delete |
+| Old dataService not deleted | `app/api/webhook/services/dataService.ts` | Confusion risk; superseded by `lib/db/dataService.ts` |
+| `pending_confirmations.action` CHECK constraint mismatch | v2 migration vs app code | Migration only lists `confirm_bill\|confirm_entry\|confirm_delete`; app also uses `confirm_text_entry`, `delete_pick`, `pnl_context` — verify constraint in Supabase dashboard |
+| `deletePendingConfirmation` deletes ALL rows | `lib/db/dataService.ts` | Deletes every pending row for the restaurant at once — could interfere if two flows overlap |
+| Rate limiter resets on cold start | `guards/rateLimiter.ts` | Each Vercel function instance has its own counter |
+| `queryFreeformHandler` system prompt missing granular fixed columns | `handlers/queryFreeformHandler.ts:40` | Fixed column definition covers only rent/electricity/salary/fixed/gas — missing pg/internet/garbage/repairs/marketing/misc |
+| `layout.tsx` title not updated | `app/layout.tsx` | Page title still shows "Create Next App" |
+| Gas shown under fixed in P&L display | `queryHandler.ts FIXED_COLUMNS` | Gas (LPG, variable cost) is summed under Fixed in both Level 1 and Level 2 P&L |
 
 ---
 
-## 12. Real-World Data Quirks (from Tea Day bills analysis)
-
-These were found by reading 3 months of actual Tea Day invoices from Google Drive:
-
-- **Hyperpure sends 2 PDFs per order** — Bill of Supply (fresh, zero GST) + Tax Invoice (packaged, 5% GST). Link them via `order_reference`.
-- **Hyperpure delivery charges** (₹99–116/order) are a separate line item on every invoice → `cogs_delivery_fee`, NOT included in food COGS.
-- **Non-food items in Hyperpure/DMart bills** — paper plates, dishwash soap → `cogs_packaging` / `cogs_supplies`.
-- **DMart credit notes exist** (returned Amul Fresh Cream ₹222 in April) → `transaction_type = 'credit_note'`.
-- **Tea Day company invoices** to the outlet are intercompany transfers → `is_intercompany = true`.
-- **Milk price changed 4x** across 3 months — always store `rate + quantity`, never just `amount`.
-- **Gas is variable** — LPG cylinder bought periodically, NOT monthly fixed.
-- **PG ≠ Rent** — ₹6,500/month staff accommodation separate from ₹20-22k shop rent.
-
----
-
-## 13. Deployment
+## 15. Deployment
 
 - Push to `main` → Vercel auto-deploys (~60 seconds)
 - Production URL: `https://finmitra-ai.vercel.app`
 - Vercel project: `prj_SnaW1IgfWaPoKxC6FrNCW1FQptGw`
-- Team: `sutanu-kandar-s-projects`
 - Supabase project: `nqjhlzztsaxnzzmkokoj`
-
----
-
-## 14. Schema Migration Status
-
-> Current prod DB = OLD schema. Target = 11-table design above.
-
-| Current table | Target table | Status |
-|---|---|---|
-| `pnl_entries` | `daily_pnl` (computed) | ⏳ Needs migration |
-| `upload_records` | `upload_sources` | ⏳ Needs migration |
-| `invoice_items` | `invoice_items` (updated) | ⏳ Needs columns added |
-| `pending_confirmations` | `pending_confirmations` (updated) | ⏳ Add `action` column |
-| `audit_log` | `audit_log` (updated) | ⏳ Add amount_reversed etc. |
-| *(none)* | `financial_line_items` | ⏳ Create new |
-| *(none)* | `revenue_entries` | ⏳ Create new |
-| *(none)* | `monthly_item_spend` | ⏳ Create new |
-| *(none)* | `vendor_map` | ⏳ Create new |
-| *(none)* | `item_canonical_map` | ⏳ Create new |
-
-Migration strategy: run old + new schema in parallel, backfill `financial_line_items` from `pnl_entries`, switch reads to `daily_pnl` once verified, then deprecate `pnl_entries`.
-
+- Twilio webhook URL: `https://finmitra-ai.vercel.app/api/webhook`
