@@ -1,6 +1,9 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -275,7 +278,7 @@ export async function handlePnlQuery(
 
     // ── query_ingredient: single ingredient deep-dive ────────────────────
     if (parsed?.intent === 'query_ingredient') {
-      const ingredient = parsed.ingredient || '';
+      let ingredient = parsed.ingredient || '';
       if (!ingredient) {
         await sendMessage(from, "Which ingredient would you like to check? e.g. \"how much Carrot did I buy this month\"");
         return;
@@ -292,6 +295,53 @@ export async function handlePnlQuery(
       } else {
         startDate = monthStart;
         endDate   = today;
+      }
+
+      // ── Step 1: direct ILIKE probe ─────────────────────────────────────
+      const { data: directProbe } = await supabase
+        .from('invoice_items')
+        .select('item_canonical')
+        .eq('restaurant_id', restaurantId)
+        .ilike('item_canonical', `%${ingredient}%`)
+        .limit(1);
+
+      // ── Step 2: no direct match → ask Claude to resolve against known canonicals
+      if (!directProbe || directProbe.length === 0) {
+        const { data: allRows } = await supabase
+          .from('invoice_items')
+          .select('item_canonical')
+          .eq('restaurant_id', restaurantId)
+          .not('item_canonical', 'is', null);
+
+        const canonicalList = [...new Set(
+          (allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean)
+        )];
+
+        if (canonicalList.length > 0) {
+          const aiResponse = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 50,
+            messages: [{
+              role: 'user',
+              content: `The user asked about "${ingredient}". From this list of ingredient names: ${canonicalList.join(', ')}. Which one best matches what the user is asking about? Reply with ONLY the exact name from the list, or "NO_MATCH" if nothing matches.`
+            }]
+          });
+
+          const resolved = aiResponse.content[0]?.type === 'text'
+            ? aiResponse.content[0].text.trim()
+            : 'NO_MATCH';
+
+          console.log(`[QueryHandler] ingredient fuzzy resolve: "${ingredient}" → "${resolved}"`);
+
+          if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) {
+            await sendMessage(from,
+              `No purchases found for "${ingredient}".\n\nKnown items: ${canonicalList.slice(0, 5).join(', ')}${canonicalList.length > 5 ? '…' : ''}`
+            );
+            return;
+          }
+
+          ingredient = resolved;
+        }
       }
 
       const { data: rows } = await supabase
