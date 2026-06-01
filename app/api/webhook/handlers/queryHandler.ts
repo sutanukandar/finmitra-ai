@@ -495,19 +495,26 @@ ${vendorLines.join('\n')}`
       const metric = parsed.metric || 'revenue';
 
       const getValue = (e: any): number => {
-        if (metric === 'revenue')
+        if (metric === 'sales' || metric === 'revenue')
           return (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
                  (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
-        if (metric === 'cogs')
+        if (metric === 'cogs' || metric === 'item cost')
           return (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
                  (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                  (Number(e.water) || 0) + (Number(e.other) || 0);
         if (metric === 'fixed')
-          return FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
+          return (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
+                 (Number(e.salary) || 0) + (Number(e.fixed) || 0) +
+                 (Number(e.gas) || 0) + (Number(e.pg) || 0) +
+                 (Number(e.internet) || 0) + (Number(e.garbage) || 0) +
+                 (Number(e.repairs) || 0) + (Number(e.marketing) || 0) +
+                 (Number(e.misc) || 0);
         return Number(e[metric]) || 0;
       };
 
-      const metricLabel = metric.charAt(0).toUpperCase() + metric.slice(1);
+      const metricLabel = metric === 'sales' || metric === 'revenue'
+        ? 'Total Sales'
+        : metric.charAt(0).toUpperCase() + metric.slice(1);
 
       const lines = (entries as any[])
         .map(e => ({
