@@ -379,19 +379,43 @@ export async function handlePnlQuery(
       const invoiceTotal = rows ? (rows as any[]).reduce((s, r) => s + Number(r.amount), 0) : 0;
       const grandTotal   = invoiceTotal + pnlTotal;
 
+      const periodLabel = parsed.period === 'specific_month' && parsed.month
+        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+        : parsed.period === 'today'
+        ? 'Today'
+        : `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
+
       if (!rows || rows.length === 0) {
         if (pnlTotal > 0) {
-          const periodLabel2 = parsed.period === 'specific_month' && parsed.month
-            ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
-            : parsed.period === 'today' ? 'Today'
-            : `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
           await sendMessage(from,
-            `📦 *${ingredient} — ${periodLabel2}*\n\n` +
+            `📦 *${ingredient} — ${periodLabel}*\n\n` +
             `Total spent : ₹${pnlTotal.toLocaleString('en-IN')}\n\n` +
             `By source:\n  • Daily entries (WhatsApp/Excel): ₹${pnlTotal.toLocaleString('en-IN')}`
           );
         } else {
-          await sendMessage(from, `No ${ingredient} purchases found for this period.`);
+          // Check if the item exists in any other period
+          const { data: lastPurchase } = await supabase
+            .from('invoice_items')
+            .select('date, amount, quantity, unit, vendor')
+            .eq('restaurant_id', restaurantId)
+            .ilike('item_canonical', `%${ingredient}%`)
+            .order('date', { ascending: false })
+            .limit(1);
+
+          if (lastPurchase && lastPurchase.length > 0) {
+            const lp = lastPurchase[0] as any;
+            const lastDate = new Date(lp.date + 'T00:00:00').toLocaleDateString('en-IN', {
+              day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+            });
+            await sendMessage(from,
+              `No ${ingredient} purchases in ${periodLabel}.\n\n` +
+              `Last purchased: ${lastDate}\n` +
+              `Amount: ₹${Number(lp.amount).toLocaleString('en-IN')} ` +
+              `(${Number(lp.quantity).toFixed(2)} ${lp.unit} from ${lp.vendor})`
+            );
+          } else {
+            await sendMessage(from, `No ${ingredient} purchases found in any period.`);
+          }
         }
         return;
       }
@@ -415,12 +439,6 @@ export async function handlePnlQuery(
       if (pnlTotal > 0) {
         vendorLines.push(`  • Daily entries (WhatsApp/Excel): ₹${pnlTotal.toLocaleString('en-IN')}`);
       }
-
-      const periodLabel = parsed.period === 'specific_month' && parsed.month
-        ? new Date(parsed.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })
-        : parsed.period === 'today'
-        ? 'Today'
-        : `${new Date(today).toLocaleString('en-IN', { month: 'long' })} so far`;
 
       const purchasesLabel = `${rows.length}${pnlTotal > 0 ? ' (bills) + daily entries' : ''}`;
 
