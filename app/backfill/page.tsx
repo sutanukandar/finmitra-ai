@@ -2,8 +2,6 @@
 
 import { Fragment, useState, useRef, useCallback } from 'react';
 
-// TODO: Replace with auth session once auth is built
-const RESTAURANT_ID = 'b77ed758-9a72-4de2-9138-b353589c656d';
 
 // ─── Shared types ────────────────────────────────────────────────────────────
 
@@ -87,8 +85,88 @@ function StatusIcon({ status }: { status: RowStatus }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function BackfillPage() {
-  const [tab, setTab]             = useState<Tab>('bills');
-  const [month, setMonth]         = useState(() => new Date().toISOString().slice(0, 7));
+  const [authenticated,      setAuthenticated]      = useState(false);
+  const [passwordInput,      setPasswordInput]      = useState('');
+  const [restaurants,        setRestaurants]        = useState<{ id: string; name: string; city: string }[]>([]);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<{ id: string; name: string; city: string } | null>(null);
+
+  const [tab,   setTab]   = useState<Tab>('bills');
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
+  const handlePasswordSubmit = async () => {
+    const res  = await fetch('/api/backfill/verify-password', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ password: passwordInput }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setAuthenticated(true);
+      const r = await fetch('/api/backfill/restaurants');
+      const d = await r.json();
+      setRestaurants(d.restaurants || []);
+    } else {
+      alert('Wrong password. Please try again.');
+      setPasswordInput('');
+    }
+  };
+
+  // ── Gate 1: Password ─────────────────────────────────────────────────────
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-2xl shadow-sm border w-80 space-y-4">
+          <div className="text-center">
+            <h1 className="text-xl font-semibold">FinMitra</h1>
+            <p className="text-sm text-gray-500 mt-1">Backfill Portal</p>
+          </div>
+          <input
+            type="password"
+            placeholder="Enter portal password"
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            value={passwordInput}
+            onChange={e => setPasswordInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handlePasswordSubmit()}
+          />
+          <button
+            onClick={handlePasswordSubmit}
+            className="w-full bg-black text-white rounded-lg py-2 text-sm font-medium"
+          >
+            Enter
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Gate 2: Restaurant selector ──────────────────────────────────────────
+  if (!selectedRestaurant) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-2xl shadow-sm border w-96 space-y-4">
+          <div className="text-center">
+            <h1 className="text-xl font-semibold">Select Restaurant</h1>
+            <p className="text-sm text-gray-500 mt-1">{restaurants.length} active locations</p>
+          </div>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {restaurants.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelectedRestaurant(r)}
+                className="w-full text-left px-4 py-3 border rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="font-medium text-gray-900">{r.name}</div>
+                {r.city && <div className="text-sm text-gray-500">{r.city}</div>}
+              </button>
+            ))}
+            {restaurants.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No active restaurants found.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'bills',    label: 'Bills (PDF/Photo)' },
@@ -100,7 +178,19 @@ export default function BackfillPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b shadow-sm px-8 py-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">FinMitra Backfill Portal</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">FinMitra Backfill Portal</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {selectedRestaurant.name}
+            {selectedRestaurant.city && ` · ${selectedRestaurant.city}`}
+            <button
+              onClick={() => setSelectedRestaurant(null)}
+              className="ml-3 text-blue-600 hover:underline text-xs"
+            >
+              Change
+            </button>
+          </p>
+        </div>
         <input
           type="month"
           value={month}
@@ -127,9 +217,9 @@ export default function BackfillPage() {
           ))}
         </div>
 
-        {tab === 'bills'    && <BillsTab    month={month} />}
-        {tab === 'expenses' && <ExpensesTab month={month} />}
-        {tab === 'sales'    && <SalesTab    month={month} />}
+        {tab === 'bills'    && <BillsTab    month={month} restaurantId={selectedRestaurant.id} />}
+        {tab === 'expenses' && <ExpensesTab month={month} restaurantId={selectedRestaurant.id} />}
+        {tab === 'sales'    && <SalesTab    month={month} restaurantId={selectedRestaurant.id} />}
       </div>
     </div>
   );
@@ -139,7 +229,7 @@ export default function BackfillPage() {
 // TAB 1 — Bills (PDF / Photo)
 // ═════════════════════════════════════════════════════════════════════════════
 
-function BillsTab({ month }: { month: string }) {
+function BillsTab({ month, restaurantId }: { month: string; restaurantId: string }) {
   const [pageState, setPageState] = useState<PageState>('idle');
   const [rows, setRows]           = useState<BillRow[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -178,7 +268,7 @@ function BillsTab({ month }: { month: string }) {
 
       const fd = new FormData();
       fd.append('file', row.file);
-      fd.append('restaurantId', RESTAURANT_ID);
+      fd.append('restaurantId', restaurantId);
       fd.append('month', month);
 
       try {
@@ -234,7 +324,7 @@ function BillsTab({ month }: { month: string }) {
         const res = await fetch('/api/backfill/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ restaurantId: RESTAURANT_ID, parsed: row.parsed, month, force: row.status === 'duplicate' }),
+          body: JSON.stringify({ restaurantId: restaurantId, parsed: row.parsed, month, force: row.status === 'duplicate' }),
         });
         const data = await res.json();
         if (data.success && !data.skipped) {
@@ -522,7 +612,7 @@ function BillsTab({ month }: { month: string }) {
 
 type ExpenseSubTab = 'fixed' | 'variable';
 
-export function ExpensesTab({ month }: { month: string }) {
+export function ExpensesTab({ month, restaurantId }: { month: string; restaurantId: string }) {
   const [subTab,     setSubTab]     = useState<ExpenseSubTab>('fixed');
   const [pageState,  setPageState]  = useState<PageState>('idle');
   const [entries,    setEntries]    = useState<SimpleEntry[]>([]);
@@ -540,7 +630,7 @@ export function ExpensesTab({ month }: { month: string }) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('type', subTab);
-    fd.append('restaurantId', RESTAURANT_ID);
+    fd.append('restaurantId', restaurantId);
 
     try {
       const res  = await fetch('/api/backfill/parse-excel', { method: 'POST', body: fd });
@@ -568,7 +658,7 @@ export function ExpensesTab({ month }: { month: string }) {
       const res  = await fetch('/api/backfill/save-entries', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ restaurantId: RESTAURANT_ID, entries, source: 'backfill' }),
+        body:    JSON.stringify({ restaurantId: restaurantId, entries, source: 'backfill' }),
       });
       const data = await res.json();
 
@@ -741,7 +831,7 @@ export function ExpensesTab({ month }: { month: string }) {
 
 type SalesSubTab = 'phonepe' | 'swiggy';
 
-export function SalesTab({ month }: { month: string }) {
+export function SalesTab({ month, restaurantId }: { month: string; restaurantId: string }) {
   const [subTab,     setSubTab]     = useState<SalesSubTab>('phonepe');
   const [pageState,  setPageState]  = useState<PageState>('idle');
   const [entries,    setEntries]    = useState<SimpleEntry[]>([]);
@@ -759,7 +849,7 @@ export function SalesTab({ month }: { month: string }) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('type', subTab);
-    fd.append('restaurantId', RESTAURANT_ID);
+    fd.append('restaurantId', restaurantId);
 
     try {
       const res  = await fetch('/api/backfill/parse-csv', { method: 'POST', body: fd });
@@ -787,7 +877,7 @@ export function SalesTab({ month }: { month: string }) {
       const res  = await fetch('/api/backfill/save-entries', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ restaurantId: RESTAURANT_ID, entries, source: 'csv' }),
+        body:    JSON.stringify({ restaurantId: restaurantId, entries, source: 'csv' }),
       });
       const data = await res.json();
 

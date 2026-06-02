@@ -27,14 +27,25 @@ export async function POST(req: NextRequest) {
 
     if (!from) return NextResponse.json({ error: 'No sender' }, { status: 400 });
 
-    const { data: restaurant } = await supabase
+    const { data: restaurant, error: restaurantError } = await supabase
       .from('restaurants')
-      .select('id, name')
-      .eq('mobile', from)
+      .select('id, name, is_active')
+      .eq('whatsapp_number', from)
       .single();
 
-    if (!restaurant) {
-      await sendMessage(from, "Namaste! This number is not registered with FinMitra.");
+    if (!restaurant || restaurantError) {
+      await sendMessage(from,
+        `Hi! This number is not registered with FinMitra.\n\n` +
+        `Please contact your FinMitra representative to get set up.`
+      );
+      return NextResponse.json({ success: true });
+    }
+
+    if (!restaurant.is_active) {
+      await sendMessage(from,
+        `Your FinMitra account is currently inactive.\n` +
+        `Please contact support to reactivate.`
+      );
       return NextResponse.json({ success: true });
     }
 
