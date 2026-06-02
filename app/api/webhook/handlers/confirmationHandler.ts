@@ -147,6 +147,44 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
           await sendMessage(from, "✅ Saved! Your entry has been added to P&L.");
         }
 
+      // ── confirm_replace: SET the column to the new value ───────────────
+      } else if (action === 'confirm_replace') {
+        const { category, date, old_amount, new_amount } = pending.payload || {};
+        console.log(`[ConfirmationHandler] Replacing ${category} ₹${old_amount} → ₹${new_amount} for ${date}`);
+
+        await dataService.upsertPnlEntry(restaurantId, { date, [category]: new_amount });
+
+        await dataService.writeAuditLog(restaurantId, {
+          action:          'correct_replace',
+          date_affected:   date,
+          pnl_field:       category,
+          amount_reversed: old_amount,
+        });
+
+        const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
+        await sendMessage(from,
+          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
+        );
+
+      // ── confirm_reduce: SET the column to the pre-computed lower value ──
+      } else if (action === 'confirm_reduce') {
+        const { category, date, old_amount, new_amount } = pending.payload || {};
+        console.log(`[ConfirmationHandler] Reducing ${category} ₹${old_amount} → ₹${new_amount} for ${date}`);
+
+        await dataService.upsertPnlEntry(restaurantId, { date, [category]: new_amount });
+
+        await dataService.writeAuditLog(restaurantId, {
+          action:          'correct_reduce',
+          date_affected:   date,
+          pnl_field:       category,
+          amount_reversed: old_amount,
+        });
+
+        const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
+        await sendMessage(from,
+          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
+        );
+
       } else {
         await sendMessage(from, "✅ Done!");
       }
@@ -157,6 +195,8 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
         await sendMessage(from, "Cancelled. Nothing was deleted.");
       } else if (action === 'confirm_text_entry') {
         await sendMessage(from, "Cancelled. Nothing was saved.");
+      } else if (action === 'confirm_replace' || action === 'confirm_reduce') {
+        await sendMessage(from, "Cancelled. Nothing was changed.");
       } else {
         await sendMessage(from, "Cancelled. Bill was not saved.");
       }

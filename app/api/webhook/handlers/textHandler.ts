@@ -3,6 +3,7 @@ import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
 import { handlePnlQuery } from './queryHandler';
 import { handleFreeformQuery } from './queryFreeformHandler';
+import { handleCorrectEntry } from './correctEntryHandler';
 
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   console.log(`[TextHandler] Processing text message from ${restaurantId}: "${body}"`);
@@ -116,6 +117,9 @@ Reply *haan* to save anyway · *nahi* to cancel`;
        'query_upload_history'].includes(parsed.intent)
     ) {
       await handlePnlQuery(from, restaurantId, body, parsed);
+    }
+    else if (parsed.intent === 'correct_entry_replace' || parsed.intent === 'correct_entry_reduce') {
+      await handleCorrectEntry(from, restaurantId, parsed);
     }
     else if (parsed.intent === 'query_freeform') {
       await handleFreeformQuery(from, restaurantId, parsed.question || body);

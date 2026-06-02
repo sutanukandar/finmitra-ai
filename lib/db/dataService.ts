@@ -381,6 +381,16 @@ export const dataService = {
     console.log(`[dataService] Zeroed ${category} for ${date}`);
   },
 
+  async getPnlColumn(restaurantId: string, category: string, date: string): Promise<number> {
+    const { data } = await supabase
+      .from('pnl_entries')
+      .select(category)
+      .eq('restaurant_id', restaurantId)
+      .eq('date', date)
+      .maybeSingle();
+    return Number((data as any)?.[category] || 0);
+  },
+
   async writeAuditLog(
     restaurantId: string,
     data: {

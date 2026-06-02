@@ -35,6 +35,9 @@ export function isInContext(message: string): boolean {
     'purchased', 'receipt', 'last', 'recent', 'when', 'which', 'what',
     // Actions
     'save', 'add', 'update', 'upload', 'entry',
+    // Corrections
+    'correct', 'correction', 'replace', 'galat', 'sahi', 'reduce',
+    'change', 'wrong', 'fix', 'ghata', 'kato', 'kam karo', 'badlo',
     // Items
     'butter', 'egg', 'sugar', 'oil', 'chicken', 'carrot',
     'tomato', 'onion', 'honey', 'coffee', 'noodle', 'fries',

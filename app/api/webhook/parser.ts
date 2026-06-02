@@ -11,7 +11,7 @@ export const parser = {
     const systemPrompt = `You are FinMitra. Today's date is ${todayDate}.
 Parse the user message and return ONLY valid JSON (no markdown, no code blocks, no extra text).
 
-Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_pnl_detail, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, query_freeform, help, unknown.
+Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_pnl_detail, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, correct_entry_replace, correct_entry_reduce, query_freeform, help, unknown.
 
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales → category: "sales"
@@ -241,6 +241,29 @@ For query_upload_history — user asks about recently uploaded bills or their co
 - "which bills were uploaded this month" → {"intent": "query_upload_history", "vendor_filter": null, "target": "list"}
 - vendor_filter: "hyperpure" | "bigbasket" | "dmart" | null (null = all vendors)
 - target: "last" (show most recent upload with full item list) | "list" (show recent 5 uploads)
+
+For correct_entry_replace — user wants to SET a P&L column to a specific amount (replace wrong value):
+- "sales kal galat tha, 4200 karo" → {"intent": "correct_entry_replace", "category": "sales", "date": "YESTERDAY", "new_amount": 4200}
+- "replace milk yesterday with 300" → {"intent": "correct_entry_replace", "category": "milk", "date": "YESTERDAY", "new_amount": 300}
+- "aaj ka swiggy galat save hua, 2400 karo" → {"intent": "correct_entry_replace", "category": "swiggy", "date": "TODAY", "new_amount": 2400}
+- "phonepe aaj 1200 karo" → {"intent": "correct_entry_replace", "category": "phonepe", "date": "TODAY", "new_amount": 1200}
+- "correct sales for 25 May to 5000" → {"intent": "correct_entry_replace", "category": "sales", "date": "2026-05-25", "new_amount": 5000}
+- "milk 25 May ko 456 tha, sahi karo 400 karo" → {"intent": "correct_entry_replace", "category": "milk", "date": "2026-05-25", "new_amount": 400}
+- keywords: galat, sahi karo, correct, replace, change, fix, wrong, update, badlo
+- category: any valid pnl column (sales, swiggy, zomato, phonepe, milk, bread, hyperpure, bigbasket, water, rent, salary, gas, electricity, etc.)
+- date: YYYY-MM-DD. Use today if no date mentioned.
+- new_amount: the value to SET (must be present; if missing, return unknown)
+
+For correct_entry_reduce — user wants to SUBTRACT an amount from a P&L entry:
+- "sales se 500 kato" → {"intent": "correct_entry_reduce", "category": "sales", "date": "TODAY", "reduce_by": 500}
+- "milk se 200 ghata do" → {"intent": "correct_entry_reduce", "category": "milk", "date": "TODAY", "reduce_by": 200}
+- "reduce phonepe by 300" → {"intent": "correct_entry_reduce", "category": "phonepe", "date": "TODAY", "reduce_by": 300}
+- "swiggy kal se 400 kam karo" → {"intent": "correct_entry_reduce", "category": "swiggy", "date": "YESTERDAY", "reduce_by": 400}
+- "yesterday milk was 50 rupees less" → {"intent": "correct_entry_reduce", "category": "milk", "date": "YESTERDAY", "reduce_by": 50}
+- keywords: se kato, ghata do, kam karo, reduce, minus, deduct, subtract
+- category: any valid pnl column
+- date: YYYY-MM-DD. Use today if no date mentioned.
+- reduce_by: the amount to subtract (must be present; if missing, return unknown)
 
 Freeform fallback — use ONLY if the message is clearly a question about the restaurant's financial data (expenses, revenue, trends, comparisons, patterns) but does NOT match any of the structured intents above:
 {"intent": "query_freeform", "question": "<verbatim user message>"}
