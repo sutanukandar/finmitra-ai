@@ -53,6 +53,7 @@ function mapFixedItem(item: string): string {
 
 function mapVariableItem(item: string): string {
   const v = item.toLowerCase();
+  if (v.includes('dmart') || v.includes('d mart') || v.includes('avenue')) return 'dmart';
   if (v.includes('milk') || v.includes('doodh')) return 'milk';
   if (v.includes('bread') || v.includes('bun') || v.includes('pav')) return 'bread';
   if (v.includes('water') || v.includes('bisleri')) return 'water';

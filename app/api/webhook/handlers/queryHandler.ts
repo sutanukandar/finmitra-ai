@@ -26,7 +26,7 @@ const FIXED_COLUMNS = [
 
 const FIXED_THRESHOLD = 2000;
 
-const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
+const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, dmart, milk, bread, water, other, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
 
 export async function handlePnlQuery(
   from: string,
@@ -71,7 +71,7 @@ export async function handlePnlQuery(
         if (!byMonth[mo]) return;
         byMonth[mo].revenue += (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
                                (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
-        byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
+        byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) + (Number(e.dmart) || 0) +
                                (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                                (Number(e.water) || 0) + (Number(e.other) || 0);
         byMonth[mo].fixed   += FIXED_COLUMNS.reduce(
@@ -145,7 +145,7 @@ export async function handlePnlQuery(
       }
 
       let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
-      let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
+      let hyperpure = 0, bigbasket = 0, dmart = 0, milk = 0, bread = 0, water = 0, other = 0;
 
       entries.forEach((e: any) => {
         sales     += e.sales     || 0;
@@ -154,6 +154,7 @@ export async function handlePnlQuery(
         phonepe   += e.phonepe   || 0;
         hyperpure += e.hyperpure || 0;
         bigbasket += e.bigbasket || 0;
+        dmart     += e.dmart     || 0;
         milk      += e.milk      || 0;
         bread     += e.bread     || 0;
         water     += e.water     || 0;
@@ -161,7 +162,7 @@ export async function handlePnlQuery(
       });
 
       const revenue    = sales + swiggy + zomato + phonepe;
-      const cogs       = hyperpure + bigbasket + milk + bread + water + other;
+      const cogs       = hyperpure + bigbasket + dmart + milk + bread + water + other;
       const fixedTotal = (entries as any[]).reduce(
         (s, e) => s + FIXED_COLUMNS.reduce((fs, { key }) => fs + (Number(e[key]) || 0), 0), 0
       );
@@ -192,6 +193,7 @@ export async function handlePnlQuery(
         const metricLabels: Record<string, string> = {
           hyperpure:   'Hyperpure',
           bigbasket:   'BigBasket',
+          dmart:       'DMart',
           milk:        'Milk',
           bread:       'Bread',
           water:       'Water',
@@ -604,7 +606,7 @@ ${vendorLines.join('\n')}`
           return (Number(e.sales) || 0) + (Number(e.phonepe) || 0) +
                  (Number(e.swiggy) || 0) + (Number(e.zomato) || 0);
         if (metric === 'cogs' || metric === 'item cost')
-          return (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) +
+          return (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) + (Number(e.dmart) || 0) +
                  (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                  (Number(e.water) || 0) + (Number(e.other) || 0);
         if (metric === 'fixed')
@@ -837,7 +839,7 @@ ${vendorLines.join('\n')}`
 
 function computePnlTotals(entries: any[]) {
   let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
-  let hyperpure = 0, bigbasket = 0, milk = 0, bread = 0, water = 0, other = 0;
+  let hyperpure = 0, bigbasket = 0, dmart = 0, milk = 0, bread = 0, water = 0, other = 0;
 
   entries.forEach((e: any) => {
     sales     += e.sales     || 0;
@@ -846,6 +848,7 @@ function computePnlTotals(entries: any[]) {
     phonepe   += e.phonepe   || 0;
     hyperpure += e.hyperpure || 0;
     bigbasket += e.bigbasket || 0;
+    dmart     += e.dmart     || 0;
     milk      += e.milk      || 0;
     bread     += e.bread     || 0;
     water     += e.water     || 0;
@@ -858,10 +861,10 @@ function computePnlTotals(entries: any[]) {
   });
 
   const revenue    = sales + swiggy + zomato + phonepe;
-  const cogs       = hyperpure + bigbasket + milk + bread + water + other;
+  const cogs       = hyperpure + bigbasket + dmart + milk + bread + water + other;
   const fixedTotal = FIXED_COLUMNS.reduce((s, { key }) => s + fixedTotals[key], 0);
 
-  return { sales, swiggy, zomato, phonepe, hyperpure, bigbasket, milk, bread, water, other,
+  return { sales, swiggy, zomato, phonepe, hyperpure, bigbasket, dmart, milk, bread, water, other,
            fixedTotals, revenue, cogs, fixedTotal };
 }
 
@@ -878,6 +881,7 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
   const cogsLines: string[] = [];
   if (t.hyperpure) cogsLines.push(`Hyperpure   : ₹${Math.round(t.hyperpure).toLocaleString('en-IN')}`);
   if (t.bigbasket) cogsLines.push(`BigBasket   : ₹${Math.round(t.bigbasket).toLocaleString('en-IN')}`);
+  if (t.dmart)     cogsLines.push(`DMart       : ₹${Math.round(t.dmart).toLocaleString('en-IN')}`);
   if (t.milk)      cogsLines.push(`Milk        : ₹${Math.round(t.milk).toLocaleString('en-IN')}`);
   if (t.bread)     cogsLines.push(`Bread       : ₹${Math.round(t.bread).toLocaleString('en-IN')}`);
   if (t.water)     cogsLines.push(`Water       : ₹${Math.round(t.water).toLocaleString('en-IN')}`);

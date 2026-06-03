@@ -48,7 +48,7 @@ export async function handleFreeformQuery(
     date:       e.date,
     totalSales: (Number(e.sales)||0) + (Number(e.phonepe)||0) +
                 (Number(e.swiggy)||0) + (Number(e.zomato)||0),
-    itemCost:   (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) +
+    itemCost:   (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) + (Number(e.dmart)||0) +
                 (Number(e.milk)||0) + (Number(e.bread)||0) +
                 (Number(e.water)||0) + (Number(e.other)||0),
     fixedCost:  (Number(e.rent)||0) + (Number(e.salary)||0) +
@@ -63,6 +63,7 @@ export async function handleFreeformQuery(
       zomato:      Number(e.zomato)||0,
       hyperpure:   Number(e.hyperpure)||0,
       bigbasket:   Number(e.bigbasket)||0,
+      dmart:       Number(e.dmart)||0,
       milk:        Number(e.milk)||0,
       bread:       Number(e.bread)||0,
       water:       Number(e.water)||0,
@@ -80,7 +81,7 @@ export async function handleFreeformQuery(
     // Individual revenue
     qrSales: 0, swiggy: 0, zomato: 0,
     // Individual COGS
-    hyperpure: 0, bigbasket: 0, milk: 0, bread: 0, water: 0, other: 0,
+    hyperpure: 0, bigbasket: 0, dmart: 0, milk: 0, bread: 0, water: 0, other: 0,
     // Individual fixed
     rent: 0, salary: 0, electricity: 0, gas: 0, pg: 0,
     internet: 0, garbage: 0, repairs: 0, marketing: 0, misc: 0,
@@ -94,7 +95,7 @@ export async function handleFreeformQuery(
 
     const rowSales = (Number(e.sales)||0) + (Number(e.phonepe)||0) +
                      (Number(e.swiggy)||0) + (Number(e.zomato)||0);
-    const rowItem  = (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) +
+    const rowItem  = (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) + (Number(e.dmart)||0) +
                      (Number(e.milk)||0) + (Number(e.bread)||0) +
                      (Number(e.water)||0) + (Number(e.other)||0);
     const rowFixed = (Number(e.rent)||0) + (Number(e.salary)||0) +
@@ -116,6 +117,7 @@ export async function handleFreeformQuery(
     months[mo].zomato     += Number(e.zomato)||0;
     months[mo].hyperpure  += Number(e.hyperpure)||0;
     months[mo].bigbasket  += Number(e.bigbasket)||0;
+    months[mo].dmart      += Number(e.dmart)||0;
     months[mo].milk       += Number(e.milk)||0;
     months[mo].bread      += Number(e.bread)||0;
     months[mo].water      += Number(e.water)||0;
@@ -156,7 +158,7 @@ export async function handleFreeformQuery(
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(e => {
       const s = (Number(e.sales)||0)+(Number(e.phonepe)||0)+(Number(e.swiggy)||0)+(Number(e.zomato)||0);
-      const i = (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
+      const i = (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
       const f = (Number(e.rent)||0)+(Number(e.salary)||0)+(Number(e.electricity)||0)+(Number(e.gas)||0)+(Number(e.pg)||0)+(Number(e.internet)||0)+(Number(e.garbage)||0)+(Number(e.repairs)||0)+(Number(e.marketing)||0)+(Number(e.misc)||0)+(Number(e.fixed)||0);
       return `${e.date}: Sales=₹${s.toFixed(0)} ItemCost=₹${i.toFixed(0)} FixedCost=₹${f.toFixed(0)} Profit=₹${(s-i-f).toFixed(0)}`;
     })

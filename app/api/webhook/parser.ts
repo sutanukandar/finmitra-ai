@@ -121,7 +121,7 @@ For query_specific — user asks for ONE number only, no full summary:
   → {"intent": "query_specific", "metric": "sales", "period": "multi_month", "months": ["2026-03", "2026-04"]}
 - multi_month rule: when user mentions 2+ months in one query → period: "multi_month", months: ["YYYY-MM", ...] in chronological order
 - metric values: "sales" | "cogs" | "cogs_pct_revenue" | "gross_margin_pct" | "net_margin_pct"
-  or any specific pnl column: "hyperpure" | "bigbasket" | "milk" | "bread" | "water" | "other"
+  or any specific pnl column: "hyperpure" | "bigbasket" | "dmart" | "milk" | "bread" | "water" | "other"
   | "rent" | "salary" | "electricity" | "gas" | "pg" | "internet" | "garbage" | "repairs"
   | "marketing" | "misc" | "swiggy" | "zomato" | "phonepe"
 
@@ -141,7 +141,7 @@ Vendor-specific spend examples:
 - "How much did I spend on BigBasket in May?"
   → {"intent": "query_specific", "metric": "bigbasket", "period": "specific_month", "month": "2026-05"}
 - "DMart expense this month"
-  → {"intent": "query_specific", "metric": "other", "period": "mtd"}
+  → {"intent": "query_specific", "metric": "dmart", "period": "mtd"}
 - "Hyperpure ka kitna hua is mahine"
   → {"intent": "query_specific", "metric": "hyperpure", "period": "mtd"}
 - "milk expense this month"

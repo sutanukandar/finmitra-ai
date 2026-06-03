@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
       : vendorName.includes('bigbasket') || vendorName.includes('big basket') ||
         vendorName.includes('bbnow') || vendorName.includes('bb now') ||
         vendorName.includes('innovative retail') ? 'bigbasket'
+      : vendorName.includes('dmart') || vendorName.includes('d-mart') ||
+        vendorName.includes('avenue e-commerce') || vendorName.includes('avenue e commerce') ? 'dmart'
       : 'other';
 
     const deliveryFee = parsed.delivery_fee || 0;

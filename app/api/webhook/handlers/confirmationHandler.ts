@@ -96,6 +96,8 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
             : vendorName.includes('bigbasket') || vendorName.includes('big basket') ||
               vendorName.includes('bbnow') || vendorName.includes('bb now') ||
               vendorName.includes('innovative retail') ? 'bigbasket'
+            : vendorName.includes('dmart') || vendorName.includes('d-mart') ||
+              vendorName.includes('avenue e-commerce') || vendorName.includes('avenue e commerce') ? 'dmart'
             : 'other';
 
           const deliveryFee = parseResult.delivery_fee || 0;
@@ -122,6 +124,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           const totals: any = {};
           if (pnlField === 'hyperpure')      totals.hyperpure = foodTotal;
           else if (pnlField === 'bigbasket') totals.bigbasket = foodTotal;
+          else if (pnlField === 'dmart')     totals.dmart     = foodTotal;
           else                               totals.other     = foodTotal;
           if (deliveryFee > 0) totals.other = (totals.other || 0) + deliveryFee;
 
