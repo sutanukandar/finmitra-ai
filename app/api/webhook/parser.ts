@@ -227,6 +227,10 @@ PERIOD RULES for query_daily_breakdown:
 3. Month only, no relative range ("daily water in April 2026", "April day by day")
    → period: "specific_month", month: "YYYY-MM"
 
+4. First N days of a month ("first 7 days", "1st 5 days", "pehle 10 din")
+   → period: "first_n_days_of_month", days: N, month: "YYYY-MM" (omit month if not specified)
+   (first N days FROM the 1st of that month)
+
 Examples:
 "daily water last 7 days in April 2026"
   → {"intent": "query_daily_breakdown", "metric": "water", "period": "last_n_days_of_month", "days": 7, "month": "2026-04"}
@@ -236,6 +240,14 @@ Examples:
   → {"intent": "query_daily_breakdown", "metric": "milk", "period": "last_n_days", "days": 7}
 "daily water in April"  (no relative range)
   → {"intent": "query_daily_breakdown", "metric": "water", "period": "specific_month", "month": "2026-04"}
+"Sales trend for first 7 days of May 2026"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "first_n_days_of_month", "days": 7, "month": "2026-05"}
+"1st 5 days of March 2026"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "first_n_days_of_month", "days": 5, "month": "2026-03"}
+"Pehle 10 din ka sales"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "first_n_days_of_month", "days": 10}
+"first 7 days milk expenses May"
+  → {"intent": "query_daily_breakdown", "metric": "milk", "period": "first_n_days_of_month", "days": 7, "month": "2026-05"}
 
 For query_vendor_breakdown — user asks for expense split by vendor/supplier:
 - "how much expense from BigBasket, Hyperpure, DMart"

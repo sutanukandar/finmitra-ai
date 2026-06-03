@@ -565,6 +565,14 @@ ${vendorLines.join('\n')}`
         startDate   = firstDay.toISOString().split('T')[0];
         endDate     = lastDay.toISOString().split('T')[0];
         periodLabel = `Last ${n} Days of ${lastDay.toLocaleString('en-IN', { month: 'long', year: 'numeric' })}`;
+      } else if (parsed.period === 'first_n_days_of_month') {
+        const n = parsed.days || 7;
+        const mo = parsed.month || today.slice(0, 7);
+        const [y, m] = mo.split('-').map(Number);
+        startDate   = new Date(Date.UTC(y, m - 1, 1)).toISOString().split('T')[0];
+        endDate     = new Date(Date.UTC(y, m - 1, n)).toISOString().split('T')[0];
+        const monthName = new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-IN', { month: 'long' });
+        periodLabel = `First ${n} Days of ${monthName} ${y}`;
       } else if (parsed.period === 'specific_month' && parsed.month) {
         const [y, m] = parsed.month.split('-').map(Number);
         startDate    = `${parsed.month}-01`;
