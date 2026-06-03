@@ -20,7 +20,7 @@ export async function handleFreeformQuery(
 
   const { data: pnlData } = await supabase
     .from('pnl_entries')
-    .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas')
+    .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas, pg, internet, garbage, repairs, marketing, misc')
     .eq('restaurant_id', restaurantId)
     .gte('date', ninetyDaysAgo)
     .order('date', { ascending: false });
@@ -36,12 +36,26 @@ export async function handleFreeformQuery(
     system: `You are a financial analyst for an Indian restaurant called Tea Day.
 Answer questions based only on the P&L data provided. Be concise — 2 to 4 lines max.
 Format all numbers with ₹ symbol in Indian style (e.g. ₹1,23,456).
-Column meanings:
-  Revenue   = sales + phonepe + swiggy + zomato
-  COGS      = hyperpure + bigbasket + milk + bread + water + other
-  Fixed     = rent + electricity + salary + fixed + gas
-  Gross profit = Revenue - COGS
-  Net profit   = Gross profit - Fixed
+
+IMPORTANT — Always use these exact formulas when calculating:
+
+Total Sales  = SUM(sales + phonepe + swiggy + zomato) per day
+Item Cost    = SUM(hyperpure + bigbasket + milk + bread + water + other) per day
+Fixed Cost   = SUM(rent + salary + electricity + gas + pg + internet +
+               garbage + repairs + marketing + misc + fixed) per day
+Profit       = Total Sales - Item Cost - Fixed Cost
+
+NEVER use only the 'sales' column as total revenue — it is just
+one component (QR/counter sales). PhonePe, Swiggy and Zomato
+must always be included.
+
+NEVER use only rent+salary+electricity for fixed cost — always
+include all fixed columns.
+
+When the user asks for May 2026 data, the correct totals are:
+Total Sales  = sales + phonepe + swiggy + zomato (all sources)
+Item Cost    = all vendor purchase columns
+Fixed Cost   = all fixed expense columns
 
 STRICT RULE: Only answer questions about THIS restaurant's financial data.
 If the question is not about the restaurant's expenses, revenue, bills, P&L,
