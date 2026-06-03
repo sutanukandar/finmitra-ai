@@ -16,8 +16,9 @@ export async function handleFreeformQuery(
 ) {
   console.log(`[FreeformHandler] Question: "${question}"`);
 
-  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-    .toISOString().split('T')[0];
+  const nowIST        = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const startDateIST  = new Date(nowIST.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const ninetyDaysAgo = startDateIST.toISOString().split('T')[0];
 
   // STEP 1 — Fetch raw rows
   const { data: entries } = await supabase
@@ -145,8 +146,8 @@ ALWAYS use the pre-computed totalSales, itemCost, fixedCost values.
 monthlySummary contains both totals AND individual columns per month.
 For trend questions about a specific category (e.g. electricity, milk,
 rent), use the individual column values directly from monthlySummary.
-Do NOT say 'no data' if totalSales/itemCost/fixedCost is non-zero —
-look at the individual columns instead.
+Do NOT re-compute or re-aggregate. Do NOT say 'no data' if individual
+columns show values — use those values directly in your answer.
 
 Answer in plain language a restaurant owner understands.
 Format numbers with ₹ and Indian comma style (₹1,00,435).
