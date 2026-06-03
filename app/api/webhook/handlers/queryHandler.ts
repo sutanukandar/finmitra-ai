@@ -181,8 +181,37 @@ export async function handlePnlQuery(
         reply = `${period_label} Net Margin: ${pct}%\n(₹${netProfit.toLocaleString('en-IN')} ÷ ₹${revenue.toLocaleString('en-IN')} Revenue)`;
       } else if (parsed.metric === 'sales') {
         reply = `${period_label} Sales: ₹${revenue.toLocaleString('en-IN')}`;
-      } else {
+      } else if (parsed.metric === 'cogs') {
         reply = `${period_label} Expenses: ₹${cogs.toLocaleString('en-IN')}`;
+      } else {
+        // Direct column query — hyperpure, bigbasket, milk, rent, swiggy, etc.
+        const metric = parsed.metric ?? '';
+        const total  = (entries as any[]).reduce(
+          (s, e) => s + (Number(e[metric]) || 0), 0
+        );
+        const metricLabels: Record<string, string> = {
+          hyperpure:   'Hyperpure',
+          bigbasket:   'BigBasket',
+          milk:        'Milk',
+          bread:       'Bread',
+          water:       'Water',
+          other:       'Other',
+          rent:        'Rent',
+          salary:      'Salary',
+          electricity: 'Electricity',
+          gas:         'Gas',
+          pg:          'Staff PG',
+          internet:    'Internet',
+          garbage:     'Garbage',
+          repairs:     'Repairs',
+          marketing:   'Marketing',
+          misc:        'Misc',
+          swiggy:      'Swiggy',
+          zomato:      'Zomato',
+          phonepe:     'PhonePe',
+        };
+        const label = metricLabels[metric] || metric.charAt(0).toUpperCase() + metric.slice(1);
+        reply = `${period_label} ${label}: ₹${total.toLocaleString('en-IN')}`;
       }
 
       await sendMessage(from, reply);

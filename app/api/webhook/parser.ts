@@ -121,6 +121,38 @@ For query_specific — user asks for ONE number only, no full summary:
   → {"intent": "query_specific", "metric": "sales", "period": "multi_month", "months": ["2026-03", "2026-04"]}
 - multi_month rule: when user mentions 2+ months in one query → period: "multi_month", months: ["YYYY-MM", ...] in chronological order
 - metric values: "sales" | "cogs" | "cogs_pct_revenue" | "gross_margin_pct" | "net_margin_pct"
+  or any specific pnl column: "hyperpure" | "bigbasket" | "milk" | "bread" | "water" | "other"
+  | "rent" | "salary" | "electricity" | "gas" | "pg" | "internet" | "garbage" | "repairs"
+  | "marketing" | "misc" | "swiggy" | "zomato" | "phonepe"
+
+RULE — vendor/category-specific vs aggregate:
+When user asks about a SPECIFIC vendor or expense category
+(Hyperpure, BigBasket, DMart, milk, bread, rent, salary, etc.):
+→ metric = that exact column name
+→ NOT "cogs" or "expenses" (those are for total aggregates)
+Use "cogs" ONLY when user asks for total variable cost/expenses
+with no specific vendor mentioned.
+Examples of cogs: "total expenses", "kitna kharch hua",
+"item cost this month", "variable cost"
+
+Vendor-specific spend examples:
+- "Amount spent on Hyperpure this month"
+  → {"intent": "query_specific", "metric": "hyperpure", "period": "mtd"}
+- "How much did I spend on BigBasket in May?"
+  → {"intent": "query_specific", "metric": "bigbasket", "period": "specific_month", "month": "2026-05"}
+- "DMart expense this month"
+  → {"intent": "query_specific", "metric": "other", "period": "mtd"}
+- "Hyperpure ka kitna hua is mahine"
+  → {"intent": "query_specific", "metric": "hyperpure", "period": "mtd"}
+- "milk expense this month"
+  → {"intent": "query_specific", "metric": "milk", "period": "mtd"}
+- "rent this month"
+  → {"intent": "query_specific", "metric": "rent", "period": "mtd"}
+- "swiggy income this month"
+  → {"intent": "query_specific", "metric": "swiggy", "period": "mtd"}
+- "salary for March"
+  → {"intent": "query_specific", "metric": "salary", "period": "specific_month", "month": "2026-03"}
+
 - Period rules:
   specific_date: user mentions a full date (day + month). date field: "YYYY-MM-DD"
   specific_month: user mentions only a month/year with no day. month field: "YYYY-MM"
