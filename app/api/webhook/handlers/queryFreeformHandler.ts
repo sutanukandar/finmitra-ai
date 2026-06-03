@@ -19,6 +19,7 @@ export async function handleFreeformQuery(
   const nowIST        = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
   const startDateIST  = new Date(nowIST.getTime() - 90 * 24 * 60 * 60 * 1000);
   const ninetyDaysAgo = startDateIST.toISOString().split('T')[0];
+  const todayIST      = nowIST.toISOString().split('T')[0];
 
   // STEP 1 — Fetch raw rows
   const { data: entries } = await supabase
@@ -32,6 +33,15 @@ export async function handleFreeformQuery(
     await sendMessage(from, "No P&L data found yet to answer this question.");
     return;
   }
+
+  // STEP 1b — Fetch invoice_items for ingredient-level breakdown
+  const { data: items } = await supabase
+    .from('invoice_items')
+    .select('date, item_canonical, quantity, unit_normalised, amount, vendor')
+    .eq('restaurant_id', restaurantId)
+    .gte('date', ninetyDaysAgo)
+    .lte('date', todayIST)
+    .order('date', { ascending: true });
 
   // STEP 2 — Pre-compute daily totals in code using exact formula
   const dailySummary = (entries as any[]).map(e => ({
@@ -122,6 +132,25 @@ export async function handleFreeformQuery(
     months[mo].misc       += Number(e.misc)||0;
   });
 
+  // STEP 3b — Build invoice items text grouped by date
+  const invoiceItemsText = (() => {
+    if (!items || items.length === 0) return 'No bill items uploaded for this period.';
+    const byDate: Record<string, any[]> = {};
+    (items as any[]).forEach(item => {
+      if (!byDate[item.date]) byDate[item.date] = [];
+      byDate[item.date].push(item);
+    });
+    return Object.entries(byDate)
+      .sort()
+      .map(([date, rows]) => {
+        const lines = rows.map((r: any) =>
+          `  - ${r.item_canonical}: ${r.quantity} ${r.unit_normalised} = ₹${Number(r.amount).toFixed(2)} (${r.vendor})`
+        ).join('\n');
+        return `${date}:\n${lines}`;
+      })
+      .join('\n\n');
+  })();
+
   // STEP 4 — Build compact daily text (all 90 days) and monthly JSON for Claude
   const dailyRowsText = (entries as any[])
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -156,7 +185,7 @@ STRICT RULE: Only answer questions about this restaurant's financial data.
 If the question is not about restaurant finances, reply with exactly: OUT_OF_SCOPE`,
     messages: [{
       role: 'user',
-      content: `Monthly Summaries (last 90 days):\n${JSON.stringify(months, null, 2)}\n\nDaily Records (last 90 days — use these for day-specific comparisons):\n${dailyRowsText}\n\nUser question: ${question}\n\nFor questions comparing specific dates, use the Daily Records section to find exact dates. Do NOT say "no data" for any date that appears in Daily Records.`,
+      content: `Monthly Summaries (last 90 days):\n${JSON.stringify(months, null, 2)}\n\nDaily Records (last 90 days — use these for day-specific comparisons):\n${dailyRowsText}\n\nIngredient-Level Bill Items (from uploaded bills — use this to answer "what items are in Others/Hyperpure/BigBasket cost?"):\n${invoiceItemsText}\n\nUser question: ${question}\n\nFor questions comparing specific dates, use the Daily Records section. For ingredient breakdown questions, use the Bill Items section. Do NOT say "no data" for any date or item that appears above.`,
     }],
   });
 
