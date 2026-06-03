@@ -63,20 +63,62 @@ export async function handleFreeformQuery(
     },
   }));
 
-  // STEP 3 — Aggregate to monthly summaries
-  const months: Record<string, {
-    totalSales: number; itemCost: number;
-    fixedCost: number; profit: number; days: number;
-  }> = {};
+  // STEP 3 — Aggregate to monthly summaries with full column breakdown
+  const initialMonth = () => ({
+    totalSales: 0, itemCost: 0, fixedCost: 0, profit: 0, days: 0,
+    // Individual revenue
+    qrSales: 0, swiggy: 0, zomato: 0,
+    // Individual COGS
+    hyperpure: 0, bigbasket: 0, milk: 0, bread: 0, water: 0, other: 0,
+    // Individual fixed
+    rent: 0, salary: 0, electricity: 0, gas: 0, pg: 0,
+    internet: 0, garbage: 0, repairs: 0, marketing: 0, misc: 0,
+  });
 
-  dailySummary.forEach(d => {
-    const mo = d.date.slice(0, 7); // YYYY-MM
-    if (!months[mo]) months[mo] = { totalSales: 0, itemCost: 0, fixedCost: 0, profit: 0, days: 0 };
-    months[mo].totalSales += d.totalSales;
-    months[mo].itemCost   += d.itemCost;
-    months[mo].fixedCost  += d.fixedCost;
-    months[mo].profit     += d.totalSales - d.itemCost - d.fixedCost;
+  const months: Record<string, ReturnType<typeof initialMonth>> = {};
+
+  (entries as any[]).forEach(e => {
+    const mo = e.date.slice(0, 7); // YYYY-MM
+    if (!months[mo]) months[mo] = initialMonth();
+
+    const rowSales = (Number(e.sales)||0) + (Number(e.phonepe)||0) +
+                     (Number(e.swiggy)||0) + (Number(e.zomato)||0);
+    const rowItem  = (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) +
+                     (Number(e.milk)||0) + (Number(e.bread)||0) +
+                     (Number(e.water)||0) + (Number(e.other)||0);
+    const rowFixed = (Number(e.rent)||0) + (Number(e.salary)||0) +
+                     (Number(e.electricity)||0) + (Number(e.gas)||0) +
+                     (Number(e.pg)||0) + (Number(e.internet)||0) +
+                     (Number(e.garbage)||0) + (Number(e.repairs)||0) +
+                     (Number(e.marketing)||0) + (Number(e.misc)||0) +
+                     (Number(e.fixed)||0);
+
+    months[mo].totalSales += rowSales;
+    months[mo].itemCost   += rowItem;
+    months[mo].fixedCost  += rowFixed;
+    months[mo].profit     += rowSales - rowItem - rowFixed;
     months[mo].days++;
+
+    // Individual columns
+    months[mo].qrSales    += (Number(e.sales)||0) + (Number(e.phonepe)||0);
+    months[mo].swiggy     += Number(e.swiggy)||0;
+    months[mo].zomato     += Number(e.zomato)||0;
+    months[mo].hyperpure  += Number(e.hyperpure)||0;
+    months[mo].bigbasket  += Number(e.bigbasket)||0;
+    months[mo].milk       += Number(e.milk)||0;
+    months[mo].bread      += Number(e.bread)||0;
+    months[mo].water      += Number(e.water)||0;
+    months[mo].other      += Number(e.other)||0;
+    months[mo].rent       += Number(e.rent)||0;
+    months[mo].salary     += Number(e.salary)||0;
+    months[mo].electricity += Number(e.electricity)||0;
+    months[mo].gas        += Number(e.gas)||0;
+    months[mo].pg         += Number(e.pg)||0;
+    months[mo].internet   += Number(e.internet)||0;
+    months[mo].garbage    += Number(e.garbage)||0;
+    months[mo].repairs    += Number(e.repairs)||0;
+    months[mo].marketing  += Number(e.marketing)||0;
+    months[mo].misc       += Number(e.misc)||0;
   });
 
   // STEP 4 — Pass pre-computed context to Claude (last 31 days of daily + full monthly)
@@ -99,6 +141,12 @@ CRITICAL: The data you receive has ALREADY been correctly computed.
 
 NEVER re-compute these from raw columns.
 ALWAYS use the pre-computed totalSales, itemCost, fixedCost values.
+
+monthlySummary contains both totals AND individual columns per month.
+For trend questions about a specific category (e.g. electricity, milk,
+rent), use the individual column values directly from monthlySummary.
+Do NOT say 'no data' if totalSales/itemCost/fixedCost is non-zero —
+look at the individual columns instead.
 
 Answer in plain language a restaurant owner understands.
 Format numbers with ₹ and Indian comma style (₹1,00,435).
