@@ -122,32 +122,31 @@ export async function handleFreeformQuery(
     months[mo].misc       += Number(e.misc)||0;
   });
 
-  // STEP 4 — Pass pre-computed context to Claude (last 31 days of daily + full monthly)
-  const dataContext = {
-    dailySummary:   dailySummary.slice(-31),
-    monthlySummary: months,
-    note: 'All totals are pre-computed and correct. Do NOT re-compute from raw columns. Use these numbers directly for your analysis.',
-  };
+  // STEP 4 — Build compact daily text (all 90 days) and monthly JSON for Claude
+  const dailyRowsText = (entries as any[])
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(e => {
+      const s = (Number(e.sales)||0)+(Number(e.phonepe)||0)+(Number(e.swiggy)||0)+(Number(e.zomato)||0);
+      const i = (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
+      const f = (Number(e.rent)||0)+(Number(e.salary)||0)+(Number(e.electricity)||0)+(Number(e.gas)||0)+(Number(e.pg)||0)+(Number(e.internet)||0)+(Number(e.garbage)||0)+(Number(e.repairs)||0)+(Number(e.marketing)||0)+(Number(e.misc)||0)+(Number(e.fixed)||0);
+      return `${e.date}: Sales=₹${s.toFixed(0)} ItemCost=₹${i.toFixed(0)} FixedCost=₹${f.toFixed(0)} Profit=₹${(s-i-f).toFixed(0)}`;
+    })
+    .join('\n');
 
   const aiResponse = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 500,
     system: `You are a financial analyst for a restaurant called ${restaurantName}.
 
-CRITICAL: The data you receive has ALREADY been correctly computed.
-- totalSales = QR sales + PhonePe + Swiggy + Zomato (all revenue sources)
-- itemCost   = all ingredient/vendor purchases (variable costs)
-- fixedCost  = rent + salary + electricity + all fixed expenses
-- profit     = totalSales - itemCost - fixedCost
+All figures are pre-computed and correct. NEVER re-compute or re-aggregate.
+- Sales = QR sales + PhonePe + Swiggy + Zomato
+- ItemCost = all vendor/ingredient purchases
+- FixedCost = rent + salary + electricity + all fixed expenses
+- Profit = Sales - ItemCost - FixedCost
 
-NEVER re-compute these from raw columns.
-ALWAYS use the pre-computed totalSales, itemCost, fixedCost values.
-
-monthlySummary contains both totals AND individual columns per month.
-For trend questions about a specific category (e.g. electricity, milk,
-rent), use the individual column values directly from monthlySummary.
-Do NOT re-compute or re-aggregate. Do NOT say 'no data' if individual
-columns show values — use those values directly in your answer.
+For questions comparing specific dates (e.g. "yesterday vs same day last month"),
+use the Daily Records section to find the exact dates.
+Do NOT say "no data" for any date that appears in Daily Records.
 
 Answer in plain language a restaurant owner understands.
 Format numbers with ₹ and Indian comma style (₹1,00,435).
@@ -157,7 +156,7 @@ STRICT RULE: Only answer questions about this restaurant's financial data.
 If the question is not about restaurant finances, reply with exactly: OUT_OF_SCOPE`,
     messages: [{
       role: 'user',
-      content: `Restaurant data:\n${JSON.stringify(dataContext, null, 2)}\n\nQuestion: ${question}`,
+      content: `Monthly Summaries (last 90 days):\n${JSON.stringify(months, null, 2)}\n\nDaily Records (last 90 days — use these for day-specific comparisons):\n${dailyRowsText}\n\nUser question: ${question}\n\nFor questions comparing specific dates, use the Daily Records section to find exact dates. Do NOT say "no data" for any date that appears in Daily Records.`,
     }],
   });
 
