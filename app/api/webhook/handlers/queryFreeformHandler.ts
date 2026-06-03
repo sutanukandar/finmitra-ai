@@ -11,61 +11,105 @@ const supabase = createClient(
 export async function handleFreeformQuery(
   from: string,
   restaurantId: string,
-  question: string
+  question: string,
+  restaurantName = 'this restaurant'
 ) {
   console.log(`[FreeformHandler] Question: "${question}"`);
 
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
     .toISOString().split('T')[0];
 
-  const { data: pnlData } = await supabase
+  // STEP 1 — Fetch raw rows
+  const { data: entries } = await supabase
     .from('pnl_entries')
-    .select('date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, milk, bread, water, other, rent, electricity, salary, fixed, gas, pg, internet, garbage, repairs, marketing, misc')
+    .select('*')
     .eq('restaurant_id', restaurantId)
     .gte('date', ninetyDaysAgo)
-    .order('date', { ascending: false });
+    .order('date', { ascending: true });
 
-  if (!pnlData || pnlData.length === 0) {
+  if (!entries || entries.length === 0) {
     await sendMessage(from, "No P&L data found yet to answer this question.");
     return;
   }
 
+  // STEP 2 — Pre-compute daily totals in code using exact formula
+  const dailySummary = (entries as any[]).map(e => ({
+    date:       e.date,
+    totalSales: (Number(e.sales)||0) + (Number(e.phonepe)||0) +
+                (Number(e.swiggy)||0) + (Number(e.zomato)||0),
+    itemCost:   (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) +
+                (Number(e.milk)||0) + (Number(e.bread)||0) +
+                (Number(e.water)||0) + (Number(e.other)||0),
+    fixedCost:  (Number(e.rent)||0) + (Number(e.salary)||0) +
+                (Number(e.electricity)||0) + (Number(e.gas)||0) +
+                (Number(e.pg)||0) + (Number(e.internet)||0) +
+                (Number(e.garbage)||0) + (Number(e.repairs)||0) +
+                (Number(e.marketing)||0) + (Number(e.misc)||0) +
+                (Number(e.fixed)||0),
+    breakdown: {
+      qrSales:     (Number(e.sales)||0) + (Number(e.phonepe)||0),
+      swiggy:      Number(e.swiggy)||0,
+      zomato:      Number(e.zomato)||0,
+      hyperpure:   Number(e.hyperpure)||0,
+      bigbasket:   Number(e.bigbasket)||0,
+      milk:        Number(e.milk)||0,
+      bread:       Number(e.bread)||0,
+      water:       Number(e.water)||0,
+      other:       Number(e.other)||0,
+      rent:        Number(e.rent)||0,
+      salary:      Number(e.salary)||0,
+      electricity: Number(e.electricity)||0,
+      pg:          Number(e.pg)||0,
+    },
+  }));
+
+  // STEP 3 — Aggregate to monthly summaries
+  const months: Record<string, {
+    totalSales: number; itemCost: number;
+    fixedCost: number; profit: number; days: number;
+  }> = {};
+
+  dailySummary.forEach(d => {
+    const mo = d.date.slice(0, 7); // YYYY-MM
+    if (!months[mo]) months[mo] = { totalSales: 0, itemCost: 0, fixedCost: 0, profit: 0, days: 0 };
+    months[mo].totalSales += d.totalSales;
+    months[mo].itemCost   += d.itemCost;
+    months[mo].fixedCost  += d.fixedCost;
+    months[mo].profit     += d.totalSales - d.itemCost - d.fixedCost;
+    months[mo].days++;
+  });
+
+  // STEP 4 — Pass pre-computed context to Claude (last 31 days of daily + full monthly)
+  const dataContext = {
+    dailySummary:   dailySummary.slice(-31),
+    monthlySummary: months,
+    note: 'All totals are pre-computed and correct. Do NOT re-compute from raw columns. Use these numbers directly for your analysis.',
+  };
+
   const aiResponse = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 500,
-    system: `You are a financial analyst for an Indian restaurant called Tea Day.
-Answer questions based only on the P&L data provided. Be concise — 2 to 4 lines max.
-Format all numbers with ₹ symbol in Indian style (e.g. ₹1,23,456).
+    system: `You are a financial analyst for a restaurant called ${restaurantName}.
 
-IMPORTANT — Always use these exact formulas when calculating:
+CRITICAL: The data you receive has ALREADY been correctly computed.
+- totalSales = QR sales + PhonePe + Swiggy + Zomato (all revenue sources)
+- itemCost   = all ingredient/vendor purchases (variable costs)
+- fixedCost  = rent + salary + electricity + all fixed expenses
+- profit     = totalSales - itemCost - fixedCost
 
-Total Sales  = SUM(sales + phonepe + swiggy + zomato) per day
-Item Cost    = SUM(hyperpure + bigbasket + milk + bread + water + other) per day
-Fixed Cost   = SUM(rent + salary + electricity + gas + pg + internet +
-               garbage + repairs + marketing + misc + fixed) per day
-Profit       = Total Sales - Item Cost - Fixed Cost
+NEVER re-compute these from raw columns.
+ALWAYS use the pre-computed totalSales, itemCost, fixedCost values.
 
-NEVER use only the 'sales' column as total revenue — it is just
-one component (QR/counter sales). PhonePe, Swiggy and Zomato
-must always be included.
+Answer in plain language a restaurant owner understands.
+Format numbers with ₹ and Indian comma style (₹1,00,435).
+Be concise — 5 to 8 lines max.
 
-NEVER use only rent+salary+electricity for fixed cost — always
-include all fixed columns.
-
-When the user asks for May 2026 data, the correct totals are:
-Total Sales  = sales + phonepe + swiggy + zomato (all sources)
-Item Cost    = all vendor purchase columns
-Fixed Cost   = all fixed expense columns
-
-STRICT RULE: Only answer questions about THIS restaurant's financial data.
-If the question is not about the restaurant's expenses, revenue, bills, P&L,
-or operational costs — respond with exactly the word: OUT_OF_SCOPE
-Do not answer general knowledge questions, recipes, news, or anything
-unrelated to the restaurant's finances.`,
+STRICT RULE: Only answer questions about this restaurant's financial data.
+If the question is not about restaurant finances, reply with exactly: OUT_OF_SCOPE`,
     messages: [{
       role: 'user',
-      content: `P&L data (last 90 days):\n${JSON.stringify(pnlData)}\n\nQuestion: ${question}`
-    }]
+      content: `Restaurant data:\n${JSON.stringify(dataContext, null, 2)}\n\nQuestion: ${question}`,
+    }],
   });
 
   const answer = aiResponse.content[0]?.type === 'text'
