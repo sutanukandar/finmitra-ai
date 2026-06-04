@@ -5,43 +5,114 @@ import { handlePnlQuery } from './queryHandler';
 import { handleFreeformQuery } from './queryFreeformHandler';
 import { handleCorrectEntry } from './correctEntryHandler';
 
+// Pre-parser fast path: deterministic routing BEFORE calling the Claude API.
+// Catches unambiguous patterns with regex — avoids token spend and LLM mis-classification.
+function preParseIntent(body: string): ParsedIntent | null {
+  const lower = body.toLowerCase().trim();
+
+  // Period helper for query_specific
+  // 'mtd' = this month; undefined = today (falls to else-branch in handler)
+  const spPeriod: string | undefined =
+    /\baaj\b|\btoday\b/.test(lower) ? undefined : 'mtd';
+
+  // ── 1. TREND / LAST N DAYS / DAY-WISE → query_daily_breakdown ──────
+  // "daily" alone is intentionally excluded — "daily milk 200" is add_entries.
+  const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
+  if (/\btrend\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
+    const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
+    let metric = 'sales';
+    if (/\bmilk\b/.test(lower))                      metric = 'milk';
+    else if (/\bbread\b/.test(lower))                metric = 'bread';
+    else if (/\bwater\b/.test(lower))                metric = 'water';
+    else if (/\bhyperpure\b/.test(lower))            metric = 'hyperpure';
+    else if (/bigbasket|big\s*basket/.test(lower))   metric = 'bigbasket';
+    else if (/\bdmart\b/.test(lower))                metric = 'dmart';
+    else if (/\bswiggy\b/.test(lower))               metric = 'swiggy';
+    else if (/\bzomato\b/.test(lower))               metric = 'zomato';
+    else if (/\bphonepe\b/.test(lower))              metric = 'phonepe';
+    else if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
+    return { intent: 'query_daily_breakdown', metric, period: 'last_n_days', days };
+  }
+
+  // ── 2. TOTAL SALES / REVENUE ────────────────────────────────────────
+  if (/total\s+sales|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
+    return { intent: 'query_specific', metric: 'sales', period: spPeriod };
+  }
+
+  // ── 3. TOTAL EXPENSES / COGS ─────────────────────────────────────────
+  if (/total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
+    return { intent: 'query_specific', metric: 'cogs', period: 'mtd' };
+  }
+
+  // ── 4. SPECIFIC METRIC QUESTIONS ────────────────────────────────────
+  const metricMap: [RegExp, string][] = [
+    [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
+    [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
+    [/how\s+much.*\bwater\b|water.*(?:expense|cost)/,                                  'water'],
+    [/how\s+much.*hyperpure|hyperpure.*(?:bill|expense|cost|total|ka\s+kitna)/,        'hyperpure'],
+    [/how\s+much.*bigbasket|bigbasket.*(?:bill|expense|cost|total)/,                   'bigbasket'],
+    [/how\s+much.*\bdmart\b|dmart.*(?:bill|expense|cost|total)/,                       'dmart'],
+    [/how\s+much.*\brent\b|what\s+is.*rent/,                                           'rent'],
+    [/how\s+much.*\bswiggy\b|swiggy.*(?:total|income|revenue)/,                        'swiggy'],
+    [/how\s+much.*\bzomato\b|zomato.*(?:total|income|revenue)/,                        'zomato'],
+    [/how\s+much.*\bphonepe\b|phonepe.*(?:total|income|revenue)/,                      'phonepe'],
+    [/how\s+much.*(?:salary|wages)|salary.*(?:this\s+month|is\s+mahine)/,              'salary'],
+    [/how\s+much.*electricity|electricity.*(?:bill|total)/,                             'electricity'],
+  ];
+  for (const [pattern, metric] of metricMap) {
+    if (pattern.test(lower)) {
+      return { intent: 'query_specific', metric, period: 'mtd' };
+    }
+  }
+
+  return null;
+}
+
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   console.log(`[TextHandler] Processing text message from ${restaurantId}: "${body}"`);
 
   try {
     const todayDate = new Date().toISOString().split('T')[0];
-    const parsed: ParsedIntent = await parser.parseTextMessage(body, todayDate);
 
-    console.log(`[TextHandler] Parsed intent:`, parsed);
+    // Try pre-parser fast path first (no Claude call)
+    const preOverride = preParseIntent(body);
+    let parsed: ParsedIntent;
 
-    // Safety override: trend/daily/last-N-days queries must NEVER reach freeform.
-    // The LLM parser occasionally misclassifies them; this regex check is deterministic.
-    if (parsed.intent === 'query_freeform' || parsed.intent === 'unknown') {
-      const lower = body.toLowerCase();
-      const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
-      const hasTrend   = /\btrend\b/.test(lower);
-      const hasDaily   = /\bdaily\b|\bdin\s+ka\b/.test(lower);
-      const hasDayWise = /day[\s-]?wise|day\s+by\s+day/.test(lower);
+    if (preOverride) {
+      console.log(`[TextHandler] Pre-parser fast path: intent=${preOverride.intent} metric=${preOverride.metric} period=${preOverride.period}`);
+      parsed = preOverride;
+    } else {
+      parsed = await parser.parseTextMessage(body, todayDate);
+      console.log(`[TextHandler] Parsed intent:`, parsed);
 
-      if (hasTrend || hasDaily || hasDayWise || lastNMatch) {
-        const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
-        let metric = 'sales';
-        if (/\bmilk\b/.test(lower))                           metric = 'milk';
-        else if (/\bbread\b/.test(lower))                     metric = 'bread';
-        else if (/\bwater\b/.test(lower))                     metric = 'water';
-        else if (/\bhyperpure\b/.test(lower))                 metric = 'hyperpure';
-        else if (/bigbasket|big\s+basket/.test(lower))        metric = 'bigbasket';
-        else if (/\bdmart\b|d[\s-]mart/.test(lower))          metric = 'dmart';
-        else if (/\bswiggy\b/.test(lower))                    metric = 'swiggy';
-        else if (/\bzomato\b/.test(lower))                    metric = 'zomato';
-        else if (/\bphonepe\b/.test(lower))                   metric = 'phonepe';
-        else if (/expense|cost|cogs|kharch/.test(lower))      metric = 'cogs';
+      // Post-parser safety: backup for any trend/daily that slips through pre-parser
+      if (parsed.intent === 'query_freeform' || parsed.intent === 'unknown') {
+        const lower = body.toLowerCase();
+        const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
+        const hasTrend   = /\btrend\b/.test(lower);
+        const hasDaily   = /\bdaily\b|\bdin\s+ka\b/.test(lower);
+        const hasDayWise = /day[\s-]?wise|day\s+by\s+day/.test(lower);
 
-        console.log(`[TextHandler] Safety override → query_daily_breakdown metric=${metric} days=${days}`);
-        parsed.intent = 'query_daily_breakdown' as any;
-        (parsed as any).metric = metric;
-        (parsed as any).period = 'last_n_days';
-        (parsed as any).days   = days;
+        if (hasTrend || hasDaily || hasDayWise || lastNMatch) {
+          const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
+          let metric = 'sales';
+          if (/\bmilk\b/.test(lower))                           metric = 'milk';
+          else if (/\bbread\b/.test(lower))                     metric = 'bread';
+          else if (/\bwater\b/.test(lower))                     metric = 'water';
+          else if (/\bhyperpure\b/.test(lower))                 metric = 'hyperpure';
+          else if (/bigbasket|big\s+basket/.test(lower))        metric = 'bigbasket';
+          else if (/\bdmart\b|d[\s-]mart/.test(lower))          metric = 'dmart';
+          else if (/\bswiggy\b/.test(lower))                    metric = 'swiggy';
+          else if (/\bzomato\b/.test(lower))                    metric = 'zomato';
+          else if (/\bphonepe\b/.test(lower))                   metric = 'phonepe';
+          else if (/expense|cost|cogs|kharch/.test(lower))      metric = 'cogs';
+
+          console.log(`[TextHandler] Post-parser safety override → query_daily_breakdown metric=${metric} days=${days}`);
+          parsed.intent = 'query_daily_breakdown' as any;
+          (parsed as any).metric = metric;
+          (parsed as any).period = 'last_n_days';
+          (parsed as any).days   = days;
+        }
       }
     }
 

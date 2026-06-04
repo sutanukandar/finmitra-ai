@@ -13,6 +13,17 @@ Parse the user message and return ONLY valid JSON (no markdown, no code blocks, 
 
 Supported intents: add_entries, query_today, query_mtd, query_lastmonth, query_specific, query_pnl, query_pnl_detail, query_items, query_ingredient, query_vendor_breakdown, query_daily_breakdown, query_upload_history, correct_entry_replace, correct_entry_reduce, query_freeform, help, unknown.
 
+RULE 1: Question phrasing ("What is", "How much", "Tell me") does NOT change the intent.
+"What is total sales this month?" = "sales this month" = query_specific.
+"How much did I spend on milk?" = "milk expense this month" = query_specific.
+NEVER use query_freeform for simple single-metric questions.
+
+RULE 2: Any query containing "trend", "daily", "last N days", or "day by day"
+MUST be query_daily_breakdown. NEVER query_freeform.
+
+RULE 3: Any query asking for a total/amount for a time period with a specific metric
+(sales, milk, rent, hyperpure, swiggy, etc.) MUST be query_specific. NEVER query_freeform.
+
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales → category: "sales"
 - swiggy / swiggy sales / swiggy revenue / swiggy income / swiggy settlement → category: "swiggy"
@@ -120,6 +131,30 @@ For query_specific — user asks for ONE number only, no full summary:
 - "sales for March and April"
   → {"intent": "query_specific", "metric": "sales", "period": "multi_month", "months": ["2026-03", "2026-04"]}
 - multi_month rule: when user mentions 2+ months in one query → period: "multi_month", months: ["YYYY-MM", ...] in chronological order
+
+Question-phrased query_specific examples (these are query_specific, NOT query_freeform):
+- "What is total sales for this month?"
+  → {"intent": "query_specific", "metric": "sales", "period": "mtd"}
+- "What is my revenue this month?"
+  → {"intent": "query_specific", "metric": "sales", "period": "mtd"}
+- "How much did I sell today?"
+  → {"intent": "query_specific", "metric": "sales", "period": "today"}
+- "How much have I spent on milk this month?"
+  → {"intent": "query_specific", "metric": "milk", "period": "mtd"}
+- "How much is my Hyperpure bill this month?"
+  → {"intent": "query_specific", "metric": "hyperpure", "period": "mtd"}
+- "What are my total expenses this month?"
+  → {"intent": "query_specific", "metric": "cogs", "period": "mtd"}
+- "What is my rent this month?"
+  → {"intent": "query_specific", "metric": "rent", "period": "mtd"}
+- "How much is BigBasket spend in May?"
+  → {"intent": "query_specific", "metric": "bigbasket", "period": "specific_month", "month": "2026-05"}
+- "Tell me swiggy income today"
+  → {"intent": "query_specific", "metric": "swiggy", "period": "today"}
+- "kitna bika aaj"
+  → {"intent": "query_specific", "metric": "sales", "period": "today"}
+- "is mahine kitna kharch hua"
+  → {"intent": "query_specific", "metric": "cogs", "period": "mtd"}
 - metric values: "sales" | "cogs" | "cogs_pct_revenue" | "gross_margin_pct" | "net_margin_pct"
   or any specific pnl column: "hyperpure" | "bigbasket" | "dmart" | "milk" | "bread" | "water" | "other"
   | "rent" | "salary" | "electricity" | "gas" | "pg" | "internet" | "garbage" | "repairs"
@@ -199,8 +234,16 @@ For query_daily_breakdown — user wants day-by-day values for one metric over a
 RULE: Any message containing "trend", "day-wise", "day by day", "daily" with a time range
 MUST use query_daily_breakdown, NOT query_freeform or query_pnl.
 
+- "Sales trend last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
 - "Sales trend of last 7 days"
   → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
+- "Show me daily sales for last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
+- "Daily milk expense last 30 days"
+  → {"intent": "query_daily_breakdown", "metric": "milk", "period": "last_n_days", "days": 30}
+- "Expense trend last 14 days"
+  → {"intent": "query_daily_breakdown", "metric": "cogs", "period": "last_n_days", "days": 14}
 - "sales trend last 7 days"
   → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
 - "show me sales trend"
