@@ -195,6 +195,16 @@ For query_ingredient — user asks about a specific ingredient across vendors:
 - month: "YYYY-MM" — only when period = "specific_month"
 
 For query_daily_breakdown — user wants day-by-day values for one metric over a date range:
+
+RULE: Any message containing "trend", "day-wise", "day by day", "daily" with a time range
+MUST use query_daily_breakdown, NOT query_freeform or query_pnl.
+
+- "Sales trend of last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
+- "sales trend last 7 days"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
+- "show me sales trend"
+  → {"intent": "query_daily_breakdown", "metric": "sales", "period": "last_n_days", "days": 7}
 - "daily milk expenses for last 7 days"
   → {"intent": "query_daily_breakdown", "metric": "milk", "period": "last_n_days", "days": 7}
 - "show me daily sales for last 10 days"

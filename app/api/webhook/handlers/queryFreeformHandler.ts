@@ -34,14 +34,21 @@ export async function handleFreeformQuery(
     return;
   }
 
-  // STEP 1b — Fetch invoice_items for ingredient-level breakdown
-  const { data: items } = await supabase
-    .from('invoice_items')
-    .select('date, item_canonical, quantity, unit_normalised, amount, vendor')
-    .eq('restaurant_id', restaurantId)
-    .gte('date', ninetyDaysAgo)
-    .lte('date', todayIST)
-    .order('date', { ascending: true });
+  // STEP 1b — Fetch invoice_items for ingredient-level breakdown (last 30 days only to avoid timeout)
+  const thirtyDaysAgo = new Date(nowIST.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  let items: any[] | null = null;
+  try {
+    const { data } = await supabase
+      .from('invoice_items')
+      .select('date, item_canonical, quantity, unit_normalised, amount, vendor')
+      .eq('restaurant_id', restaurantId)
+      .gte('date', thirtyDaysAgo)
+      .lte('date', todayIST)
+      .order('date', { ascending: true });
+    items = data;
+  } catch (err) {
+    console.warn('[FreeformHandler] invoice_items fetch failed, continuing without it:', err);
+  }
 
   // STEP 2 — Pre-compute daily totals in code using exact formula
   const dailySummary = (entries as any[]).map(e => ({
