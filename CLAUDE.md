@@ -1,8 +1,23 @@
-# FinMitra AI — CLAUDE.md
+# FinMitra AI — CLAUDE.md v2.2
 
-> Describes the **actual codebase state as of 31 May 2026**.
+> Describes the **actual codebase state as of 03 Jun 2026**.
 > What exists and works today — not a target design.
 > Read this before making any changes.
+
+---
+
+## ⚠️ WARNING — Notion Schema Docs vs Production Reality
+
+**The Notion architecture documents describe the IDEAL target schema — NOT what is running in production.**
+
+| Notion doc describes | Production reality |
+|---|---|
+| 4-tier normalised schema: `upload_sources`, `financial_line_items`, `revenue_entries`, `daily_pnl` | Flat denormalised table: `pnl_entries` (one row per restaurant+date) |
+| Separate revenue and cost tables | All revenue + COGS + fixed costs in a single wide row |
+| `financial_line_items` as source of truth | `invoice_items` + `pnl_entries` are the source of truth |
+| `upload_sources` replacing `upload_records` | `upload_records` is live and written on every confirmed bill |
+
+**All application code reads and writes `pnl_entries`, `upload_records`, `invoice_items`.** The v2 tables were created by migration `20260527000000_schema_v2.sql` but no application code writes to them. Do not design new features for the v2 schema without first confirming a migration plan.
 
 ---
 
@@ -104,6 +119,7 @@ One row per `(restaurant_id, date)`. All monetary values are additive — rows a
 | **zomato** | numeric | Zomato delivery revenue or settlement |
 | **hyperpure** | numeric | Hyperpure food cost (excl. delivery fee) |
 | **bigbasket** | numeric | BigBasket food cost |
+| **dmart** | numeric | DMart food cost — added 03 Jun 2026, backfilled from invoice_items |
 | **milk** | numeric | Milk expense |
 | **bread** | numeric | Bread expense |
 | **water** | numeric | Water/Bisleri expense |
@@ -158,7 +174,7 @@ One row per `(restaurant_id, date)`. All monetary values are additive — rows a
 | doc_type | text | `"invoice"` |
 | source | text | `"whatsapp"` or `"backfill"` |
 | amount | numeric | Full bill total including delivery |
-| pnl_field | text | `"hyperpure"` / `"bigbasket"` / `"other"` |
+| pnl_field | text | `"hyperpure"` / `"bigbasket"` / `"dmart"` / `"other"` |
 | file_url | text | Original Twilio media URL |
 | metadata | jsonb | `{ vendor: "...", delivery_fee: N }` |
 | deleted_at | timestamptz | Soft delete |
@@ -225,7 +241,7 @@ Created by `20260527000000_schema_v2.sql`. No reads or writes from app code:
 
 ```
 Revenue      = sales + phonepe + swiggy + zomato
-COGS         = hyperpure + bigbasket + milk + bread + water + other
+COGS         = hyperpure + bigbasket + dmart + milk + bread + water + other
 Fixed        = rent + electricity + salary + gas + fixed
              + pg + internet + garbage + repairs + marketing + misc
 Gross Profit = Revenue − COGS
@@ -340,7 +356,7 @@ All modules must import from here. Never call Supabase directly from handlers.
 
 ## 9. Backfill Portal (`/backfill`)
 
-Three-tab React UI at `app/backfill/page.tsx`. **Restaurant ID is hardcoded** — no auth.
+Three-tab React UI at `app/backfill/page.tsx`. Password-gated + restaurant selector (multi-restaurant support added Jun 2026).
 
 | Tab | Sub-tabs | APIs | What it does |
 |---|---|---|---|
@@ -352,7 +368,7 @@ Three-tab React UI at `app/backfill/page.tsx`. **Restaurant ID is hardcoded** �
 `rent`, `salary`/wages/arup/staff, `electricity`/bescom/current, `gas`/lpg/cylinder, `pg`/accommodation/hostel, `internet`/wifi/broadband, `garbage`/waste/cleaning, `repairs`/maintenance/amc, `marketing`/ads/promotion → anything else → `misc`
 
 **Excel variable mapping** (`mapVariableItem`):
-milk/doodh → `milk`, bread/bun/pav → `bread`, water/bisleri → `water` → anything else → `other`
+dmart/d mart/avenue → `dmart`, milk/doodh → `milk`, bread/bun/pav → `bread`, water/bisleri → `water` → anything else → `other`
 
 **PhonePe CSV**: aggregates rows where `Transaction Status === "COMPLETED"`, grouped by date → `pnl_field: "phonepe"`. Handles `YYYY-MM-DD HH:MM:SS` and `DD/MM/YYYY HH:MM:SS` date formats.
 
@@ -388,6 +404,7 @@ SUPABASE_SERVICE_ROLE_KEY=  # Server only — bypasses RLS
 SUPABASE_ANON_KEY=          # Client side — respects RLS (not currently used)
 JWT_SECRET=
 MSG91_KEY=
+BACKFILL_PASSWORD=          # Gate for /backfill portal (added Jun 2026)
 ```
 
 ---
@@ -414,11 +431,12 @@ MSG91_KEY=
 - Delete flow: "hata do" + single or multi-match picker
 - Context guard: keyword allowlist blocks off-topic messages before token spend
 - Rate limiter: 30 msg/hr per phone (in-memory)
-- Backfill portal: bills (PDF/photo batch), fixed/variable expenses (Excel), PhonePe CSV
+- Backfill portal: password-gated, multi-restaurant selector, bills (PDF/photo batch), fixed/variable expenses (Excel), PhonePe CSV
 - Template downloads: `/api/templates/pnl` and `/api/templates/invoice`
 - Granular fixed cost columns: pg, internet, garbage, repairs, marketing, misc
 - Fixed cost smart display: items ≥ ₹2,000 shown individually; rest clubbed as "Others"
 - Swiggy and Zomato revenue text entries map to their own pnl columns (not hyperpure)
+- DMart as first-class vendor: `pnl_entries.dmart` column, Level 2 P&L display, parser metric, backfill detection
 
 ---
 
@@ -440,20 +458,128 @@ MSG91_KEY=
 
 | Issue | Location | Impact |
 |---|---|---|
-| Restaurant ID hardcoded | `app/backfill/page.tsx:6` | Backfill portal only works for pilot customer |
 | Homepage is default boilerplate | `app/page.tsx` | Production URL shows "Create Next App" |
 | `lib/data/pnlService.ts` is stale | Revenue formula missing swiggy/zomato/sales columns | Do not use — safe to delete |
 | Old dataService not deleted | `app/api/webhook/services/dataService.ts` | Confusion risk; superseded by `lib/db/dataService.ts` |
 | `pending_confirmations.action` CHECK constraint mismatch | v2 migration vs app code | Migration only lists `confirm_bill\|confirm_entry\|confirm_delete`; app also uses `confirm_text_entry`, `delete_pick`, `pnl_context` — verify constraint in Supabase dashboard |
 | `deletePendingConfirmation` deletes ALL rows | `lib/db/dataService.ts` | Deletes every pending row for the restaurant at once — could interfere if two flows overlap |
 | Rate limiter resets on cold start | `guards/rateLimiter.ts` | Each Vercel function instance has its own counter |
-| `queryFreeformHandler` system prompt missing granular fixed columns | `handlers/queryFreeformHandler.ts:40` | Fixed column definition covers only rent/electricity/salary/fixed/gas — missing pg/internet/garbage/repairs/marketing/misc |
 | `layout.tsx` title not updated | `app/layout.tsx` | Page title still shows "Create Next App" |
 | Gas shown under fixed in P&L display | `queryHandler.ts FIXED_COLUMNS` | Gas (LPG, variable cost) is summed under Fixed in both Level 1 and Level 2 P&L |
+| "Yesterday vs same day last month" returns no data | `queryFreeformHandler.ts` | Freeform handler passes monthly aggregates to Claude — day-specific comparisons have no daily row data to reference |
+| "What items are in Others cost?" gets no answer | `queryFreeformHandler.ts` | Freeform handler does not query `invoice_items` — ingredient-level detail unavailable for this question type |
+| DMart not shown in P&L Level 2 display | `queryHandler.ts`, `queryFreeformHandler.ts` | `dmart` column not included in SELECT or COGS accumulation — DMart spend silently excluded from itemised breakdown |
 
 ---
 
-## 15. Deployment
+## 15. Pending Claude Code Prompts
+
+Ready-to-run prompts for known fixes. Copy-paste directly into Claude Code.
+
+---
+
+### Fix 1 — DMart in P&L display
+
+**Files:** `queryHandler.ts`, `queryFreeformHandler.ts`, `parser.ts`
+
+```
+Read CLAUDE.md. A new `dmart` column exists in pnl_entries (already backfilled with data).
+The column is NOT currently included in any SELECT queries or P&L display.
+Add DMart as a first-class vendor like Hyperpure and BigBasket.
+
+FILES TO UPDATE:
+
+1. queryHandler.ts
+   - Find PNL_SELECT constant → add 'dmart' to the column list
+   - Find itemCost calculation → add (Number(e.dmart)||0) to the sum
+   - In buildPnlBreakdown() Level 2 display, add DMart line after BigBasket:
+     if (dmart > 0) lines.push(`DMart       : ₹${dmart}`)
+   - In computePnlTotals() → include dmart in itemCost
+
+2. queryFreeformHandler.ts
+   - Add dmart to the SELECT columns fetched from pnl_entries
+   - Add dmart to itemCost accumulation in monthly summary loop
+   - Add dmart: 0 to the initial month object
+   - Include DMart in monthlySummaryText output
+
+3. parser.ts
+   - Add dmart metric mapping:
+     "dmart", "d mart", "dmart ka kitna", "dmart spend" → metric: 'dmart'
+
+4. parse-excel route (bill parser)
+   - Add vendor detection: if vendor ILIKE 'dmart' → pnl_field = 'dmart'
+
+COMMIT: "Feature: DMart as separate P&L line — add dmart to SELECT, display, parser, excel parser"
+```
+
+---
+
+### Fix 2 — Freeform handler: daily rows for day-specific comparisons
+
+**File:** `queryFreeformHandler.ts`
+
+```
+Read CLAUDE.md. Fix queryFreeformHandler.ts — the handler passes monthly aggregates to
+Claude but some questions need daily data (e.g. "yesterday vs same day last month",
+"which was my best day in May?", "compare last Tuesday to this Tuesday").
+
+THE FIX:
+After building the monthlySummaryText, also build a dailyRowsText from the same
+`entries` array. Include all 90 days, one line each:
+  2026-05-02: Sales=₹2880 ItemCost=₹450 FixedCost=₹0 Profit=₹2430
+
+Pass both sections to Claude in the user message:
+  Monthly Summaries (last 90 days):
+  {monthlySummaryText}
+
+  Daily Records (last 90 days — use these for day-specific comparisons):
+  {dailyRowsText}
+
+Update the system prompt to instruct Claude:
+  "For questions comparing specific dates (e.g. 'yesterday vs same day last month'),
+   use the Daily Records section to find the exact dates.
+   Do NOT say 'no data' for any date that appears in Daily Records."
+
+COMMIT: "Fix: freeform handler passes daily rows to Claude — day-specific comparisons now work"
+```
+
+---
+
+### Fix 3 — Freeform handler: ingredient-level detail from invoice_items
+
+**File:** `queryFreeformHandler.ts`
+
+```
+Read CLAUDE.md. Fix queryFreeformHandler.ts — it never queries invoice_items, so
+questions like "What items are in Others cost?" or "What did I buy from Hyperpure?"
+get no ingredient-level answer.
+
+THE FIX:
+After fetching pnl_entries, also fetch invoice_items for the same 90-day window:
+  SELECT date, item_canonical, quantity, unit_normalised, amount, vendor
+  FROM invoice_items
+  WHERE restaurant_id = restaurantId
+  AND date >= ninetyDaysAgo AND date <= todayIST
+  ORDER BY date ASC
+
+Build an invoiceItemsText grouped by date:
+  2026-05-10:
+    - Carrot: 5 Kg = ₹150.00 (Zomato Hyperpure)
+    - Tomato: 3 Kg = ₹90.00 (Zomato Hyperpure)
+
+Pass as a third section to Claude:
+  Ingredient-Level Bill Items (from uploaded bills):
+  {invoiceItemsText}
+
+Update system prompt to tell Claude:
+  "For ingredient breakdown questions, use the Bill Items section."
+
+COMMIT: "Fix: freeform handler fetches invoice_items — ingredient-level breakdown now available"
+```
+
+---
+
+## 16. Deployment
 
 - Push to `main` → Vercel auto-deploys (~60 seconds)
 - Production URL: `https://finmitra-ai.vercel.app`
