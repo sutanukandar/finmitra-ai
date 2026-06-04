@@ -319,10 +319,15 @@ For correct_entry_reduce — user wants to SUBTRACT an amount from a P&L entry:
 - date: YYYY-MM-DD. Use today if no date mentioned.
 - reduce_by: the amount to subtract (must be present; if missing, return unknown)
 
-Freeform fallback — use ONLY if the message is clearly a question about the restaurant's financial data (expenses, revenue, trends, comparisons, patterns) but does NOT match any of the structured intents above:
+Freeform fallback — use ONLY if the message is clearly a question about the restaurant's financial data but does NOT match any of the structured intents above:
 {"intent": "query_freeform", "question": "<verbatim user message>"}
 
-Examples:
+NEVER use query_freeform for:
+- Any query with "trend", "daily", "day-wise", "day by day" → use query_daily_breakdown
+- Any query with "last N days" or "past N days" → use query_daily_breakdown
+- Any single-metric question (sales, expenses, margin) → use query_specific
+
+query_freeform is ONLY for open-ended analytical questions with no clear structured answer:
 - "which month had the highest COGS?" → {"intent": "query_freeform", "question": "which month had the highest COGS?"}
 - "is my food cost improving over time?" → {"intent": "query_freeform", "question": "is my food cost improving over time?"}
 - "compare this month's expenses with last month" → {"intent": "query_freeform", "question": "compare this month's expenses with last month"}

@@ -14,6 +14,37 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
     console.log(`[TextHandler] Parsed intent:`, parsed);
 
+    // Safety override: trend/daily/last-N-days queries must NEVER reach freeform.
+    // The LLM parser occasionally misclassifies them; this regex check is deterministic.
+    if (parsed.intent === 'query_freeform' || parsed.intent === 'unknown') {
+      const lower = body.toLowerCase();
+      const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
+      const hasTrend   = /\btrend\b/.test(lower);
+      const hasDaily   = /\bdaily\b|\bdin\s+ka\b/.test(lower);
+      const hasDayWise = /day[\s-]?wise|day\s+by\s+day/.test(lower);
+
+      if (hasTrend || hasDaily || hasDayWise || lastNMatch) {
+        const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
+        let metric = 'sales';
+        if (/\bmilk\b/.test(lower))                           metric = 'milk';
+        else if (/\bbread\b/.test(lower))                     metric = 'bread';
+        else if (/\bwater\b/.test(lower))                     metric = 'water';
+        else if (/\bhyperpure\b/.test(lower))                 metric = 'hyperpure';
+        else if (/bigbasket|big\s+basket/.test(lower))        metric = 'bigbasket';
+        else if (/\bdmart\b|d[\s-]mart/.test(lower))          metric = 'dmart';
+        else if (/\bswiggy\b/.test(lower))                    metric = 'swiggy';
+        else if (/\bzomato\b/.test(lower))                    metric = 'zomato';
+        else if (/\bphonepe\b/.test(lower))                   metric = 'phonepe';
+        else if (/expense|cost|cogs|kharch/.test(lower))      metric = 'cogs';
+
+        console.log(`[TextHandler] Safety override → query_daily_breakdown metric=${metric} days=${days}`);
+        parsed.intent = 'query_daily_breakdown' as any;
+        (parsed as any).metric = metric;
+        (parsed as any).period = 'last_n_days';
+        (parsed as any).days   = days;
+      }
+    }
+
     if (parsed.intent === "add_entries" && parsed.entries && parsed.entries.length > 0) {
       let savedCount = 0;
 
