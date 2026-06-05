@@ -258,14 +258,23 @@ For query_items — user asks for top items/ingredients by spend, optionally fil
 - "top 5 items on 27 April" → {"intent":"query_items","period":"specific_date","date":"2026-04-27","vendor_filter":null,"sort_by":"value","limit":5}
 
 For query_ingredient — user asks about a specific ingredient across vendors:
+CRITICAL: query_ingredient is for food items that come from purchase bills (invoice_items),
+NOT for pnl column metrics. Food items include: butter, carrot, tomato, potato, eggs,
+curd, paneer, chicken, oil, flour, sugar, salt, onion, garlic, cheese, cream, etc.
+These are NEVER pnl columns — always use query_ingredient for them.
+pnl columns (use query_specific): milk, bread, water, hyperpure, bigbasket, dmart, rent, salary, etc.
 - "how much carrot did I buy this month"
   → {"intent": "query_ingredient", "ingredient": "Carrot", "period": "mtd"}
+- "how much butter this month"
+  → {"intent": "query_ingredient", "ingredient": "Butter", "period": "mtd"}
 - "total curd spend in April"
   → {"intent": "query_ingredient", "ingredient": "Curd", "period": "specific_month", "month": "2026-04"}
 - "kitna honey kharida is mahine"
   → {"intent": "query_ingredient", "ingredient": "Honey", "period": "mtd"}
 - "eggs ka total this month"
   → {"intent": "query_ingredient", "ingredient": "Eggs", "period": "mtd"}
+- "potato purchased this month"
+  → {"intent": "query_ingredient", "ingredient": "Potato", "period": "mtd"}
 - ingredient: always Capitalised, generic name (Carrot not fresho carrot)
 - period: "today" | "mtd" | "specific_month"
 - month: "YYYY-MM" — only when period = "specific_month"

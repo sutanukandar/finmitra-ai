@@ -224,12 +224,12 @@ const tests: TestCase[] = [
 
   // ── correct_entry ─────────────────────────────────────────────────────
   {
-    message: 'correct QR sales for 31 May to 4200',
+    message: 'correct sales for 31 May to 4200',
     expectedIntent: 'correct_entry_replace',
     expectedCategory: 'sales',
   },
   {
-    message: 'reduce QR sales for 31 May by 1506',
+    message: 'reduce sales for 31 May by 1506',
     expectedIntent: 'correct_entry_reduce',
     expectedCategory: 'sales',
   },
@@ -326,8 +326,9 @@ async function runTests() {
     }
 
     if (tc.expectedCategory !== undefined) {
-      const entries = (result as any).entries as Array<{ category: string }> | undefined;
-      const cat = entries?.[0]?.category;
+      // add_entries: category in entries[0].category
+      // correct_entry_replace/reduce: category at top level of ParsedIntent
+      const cat = (result as any).entries?.[0]?.category ?? (result as any).category;
       if (cat !== tc.expectedCategory) {
         errors.push(`category: got "${cat}", expected "${tc.expectedCategory}"`);
       }
