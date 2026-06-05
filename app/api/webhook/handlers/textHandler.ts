@@ -5,10 +5,56 @@ import { handlePnlQuery } from './queryHandler';
 import { handleFreeformQuery } from './queryFreeformHandler';
 import { handleCorrectEntry } from './correctEntryHandler';
 
+const MONTH_NAME_TO_NUM: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+  apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+  aug: 8, august: 8, sep: 9, september: 9, oct: 10, october: 10,
+  nov: 11, november: 11, dec: 12, december: 12,
+};
+
 // Pre-parser fast path: deterministic routing BEFORE calling the Claude API.
 // Catches unambiguous patterns with regex — avoids token spend and LLM mis-classification.
 function preParseIntent(body: string): ParsedIntent | null {
   const lower = body.toLowerCase().trim();
+
+  // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
+  // Catches "Sales of 4th June 3245", "milk 3rd May 456", "Expense of 2nd June 1200"
+  // Fires ONLY when: financial category + ordinal date + amount all present.
+  const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
+  const amountInMsg = lower.match(/\b(\d{3,6})\b/);
+
+  const ENTRY_KW = /\b(sales|revenue|bika|milk|bread|water|swiggy|zomato|phonepe|hyperpure|bigbasket|dmart|rent|electricity|gas|salary|pg|internet|garbage|repairs|marketing|misc|expense|kharch)\b/;
+
+  if (ordinalDateMatch && amountInMsg && ENTRY_KW.test(lower)) {
+    const day    = parseInt(ordinalDateMatch[1]);
+    const monKey = ordinalDateMatch[2].toLowerCase().slice(0, 3);
+    const mon    = MONTH_NAME_TO_NUM[monKey];
+    const yearStr = ordinalDateMatch[3];
+    const year   = yearStr ? parseInt(yearStr) : new Date().getFullYear();
+
+    if (mon) {
+      const entryDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const amount    = parseInt(amountInMsg[1]);
+
+      let category = 'sales';
+      if (/\bmilk\b/.test(lower))                    category = 'milk';
+      else if (/\bbread\b/.test(lower))              category = 'bread';
+      else if (/\bwater\b/.test(lower))              category = 'water';
+      else if (/\bhyperpure\b/.test(lower))          category = 'hyperpure';
+      else if (/bigbasket|big\s*basket/.test(lower)) category = 'bigbasket';
+      else if (/\bdmart\b/.test(lower))              category = 'dmart';
+      else if (/\bswiggy\b/.test(lower))             category = 'swiggy';
+      else if (/\bzomato\b/.test(lower))             category = 'zomato';
+      else if (/\bphonepe\b/.test(lower))            category = 'phonepe';
+      else if (/\brent\b/.test(lower))               category = 'rent';
+      else if (/\belectricity\b/.test(lower))        category = 'electricity';
+      else if (/\bgas\b/.test(lower))                category = 'gas';
+      else if (/\bsalary\b/.test(lower))             category = 'salary';
+      else if (/expense|kharch/.test(lower))         category = 'other';
+
+      return { intent: 'add_entries', entries: [{ category, amount, date: entryDate }] };
+    }
+  }
 
   // Period helper for query_specific
   // 'mtd' = this month; undefined = today (falls to else-branch in handler)

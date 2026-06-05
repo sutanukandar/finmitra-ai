@@ -24,6 +24,14 @@ MUST be query_daily_breakdown. NEVER query_freeform.
 RULE 3: Any query asking for a total/amount for a time period with a specific metric
 (sales, milk, rent, hyperpure, swiggy, etc.) MUST be query_specific. NEVER query_freeform.
 
+RULE 4: Any message that contains ALL THREE of:
+  (a) a financial category word (sales, milk, bread, water, swiggy, zomato, phonepe,
+      hyperpure, bigbasket, dmart, rent, electricity, gas, salary, expense, kharch, etc.)
+  (b) a date — including ordinal forms like "4th June", "3rd May", "1st June 2026", "2nd June"
+  (c) a rupee amount (any number)
+MUST be add_entries. NEVER query_freeform or query_specific.
+Examples: "Sales of 4th June 3245", "Milk 3rd May 456", "Expense of 2nd June 1200"
+
 Categories for add_entries:
 - sales / revenue / bika / aaj bika / today sales → category: "sales"
 - swiggy / swiggy sales / swiggy revenue / swiggy income / swiggy settlement → category: "swiggy"
@@ -50,12 +58,33 @@ Swiggy and Zomato entry examples:
 - "aaj ka swiggy 1500, zomato 900"
   → {"intent": "add_entries", "entries": [{"category": "swiggy", "amount": 1500, "date_offset": 0}, {"category": "zomato", "amount": 900, "date_offset": 0}]}
 
+Ordinal date add_entries examples (RULE 4 — these are add_entries, NOT query_freeform):
+- "Sales of 4th June 3245"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 3245, "date": "2026-06-04"}]}
+- "Sales of 4th June 2026 is 3245"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 3245, "date": "2026-06-04"}]}
+- "Sales of 3rd May 4200"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 4200, "date": "2026-05-03"}]}
+- "Milk of 4th June 456"
+  → {"intent": "add_entries", "entries": [{"category": "milk", "amount": 456, "date": "2026-06-04"}]}
+- "Expense of 2nd June 1200"
+  → {"intent": "add_entries", "entries": [{"category": "other", "amount": 1200, "date": "2026-06-02"}]}
+- "bread 3rd June 180"
+  → {"intent": "add_entries", "entries": [{"category": "bread", "amount": 180, "date": "2026-06-03"}]}
+- "milk 1st June 450"
+  → {"intent": "add_entries", "entries": [{"category": "milk", "amount": 450, "date": "2026-06-01"}]}
+
 Each line of the message may be a separate entry with its own date.
 Parse each line independently and return an array of entries.
 
 For each entry, extract the date field explicitly:
 - "25th May 2026" or "25 May 2026" → date: "2026-05-25"
 - "25 May" (no year) → date: current year, e.g. "2026-05-25"
+- "4th June" → date: "${todayDate.slice(0, 4)}-06-04"
+- "3rd May" → date: "${todayDate.slice(0, 4)}-05-03"
+- "1st June 2026" → date: "2026-06-01"
+- "2nd June" → date: "${todayDate.slice(0, 4)}-06-02"
+- ANY ordinal date (Nth Month [Year]) → strip the ordinal suffix, convert to YYYY-MM-DD
 - "aaj" / "today" / no date mentioned → date: today (${todayDate})
 - "kal" / "yesterday" → date: yesterday
 
