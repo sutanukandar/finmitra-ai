@@ -20,6 +20,7 @@ interface TestCase {
   expectedDays?: number;
   expectedMonth?: string;
   expectedCategory?: string;
+  expectedAmount?: number;              // assert entries[0].amount (add_entries only)
   description?: string;
 }
 
@@ -233,6 +234,34 @@ const tests: TestCase[] = [
     expectedIntent: 'add_entries',
     expectedCategory: 'sales',
   },
+  // Ordinal date + year: amount must be AFTER "is", NOT the year 2026
+  {
+    message: 'Sales of 4th June 2026 is 3245',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+    expectedAmount: 3245,
+    description: 'year in date must not be confused with amount',
+  },
+  {
+    message: 'Sales of 3rd May 2026 is 4200',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+    expectedAmount: 4200,
+    description: 'year in date must not be confused with amount',
+  },
+  // Ordinal date without year — no "is" — amount is the standalone number
+  {
+    message: 'Sales of 4th June 3245',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+    expectedAmount: 3245,
+  },
+  {
+    message: 'Milk of 4th June 456',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'milk',
+    expectedAmount: 456,
+  },
 
   // ── correct_entry ─────────────────────────────────────────────────────
   {
@@ -298,6 +327,14 @@ async function runTests() {
       const firstCat = entries?.[0]?.category;
       if (firstCat !== tc.expectedCategory) {
         errors.push(`category: got "${firstCat}", expected "${tc.expectedCategory}"`);
+      }
+    }
+
+    if (tc.expectedAmount !== undefined) {
+      const entries = (result as any).entries as Array<{ amount: number }> | undefined;
+      const firstAmount = entries?.[0]?.amount;
+      if (firstAmount !== tc.expectedAmount) {
+        errors.push(`amount: got ${firstAmount}, expected ${tc.expectedAmount}`);
       }
     }
 

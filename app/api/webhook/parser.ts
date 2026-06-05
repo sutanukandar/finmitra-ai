@@ -74,6 +74,18 @@ Ordinal date add_entries examples (RULE 4 — these are add_entries, NOT query_f
 - "milk 1st June 450"
   → {"intent": "add_entries", "entries": [{"category": "milk", "amount": 450, "date": "2026-06-01"}]}
 
+IMPORTANT — "is/was/=" amount marker with year in date:
+When the message contains "is N", "was N", or "= N", N is the amount — NOT the year.
+The year (e.g. 2026) in "4th June 2026" must be ignored as a potential amount.
+- "Sales of 4th June 2026 is 3245"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 3245, "date": "2026-06-04"}]}
+- "Sales of 3rd May 2026 is 4200"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 4200, "date": "2026-05-03"}]}
+- "Milk of 4th June 2026 is 456"
+  → {"intent": "add_entries", "entries": [{"category": "milk", "amount": 456, "date": "2026-06-04"}]}
+- "Revenue for 1st June 2026 was 5000"
+  → {"intent": "add_entries", "entries": [{"category": "sales", "amount": 5000, "date": "2026-06-01"}]}
+
 Each line of the message may be a separate entry with its own date.
 Parse each line independently and return an array of entries.
 

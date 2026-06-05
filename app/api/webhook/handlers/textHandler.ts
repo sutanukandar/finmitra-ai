@@ -21,7 +21,21 @@ function preParseIntent(body: string): ParsedIntent | null {
   // Catches "Sales of 4th June 3245", "milk 3rd May 456", "Expense of 2nd June 1200"
   // Fires ONLY when: financial category + ordinal date + amount all present.
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
-  const amountInMsg = lower.match(/\b(\d{3,6})\b/);
+
+  // Amount extraction: prefer explicit "is/was/= N" marker over first-number-wins.
+  // Without this, "Sales of 4th June 2026 is 3245" picks 2026 (the year) not 3245.
+  const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(\d{3,6})\b/);
+  let amountInMsg: RegExpMatchArray | null;
+  if (explicitAmountMatch) {
+    amountInMsg = explicitAmountMatch;
+  } else {
+    // Strip year numbers (2020–2035) that follow a month name before searching for amount
+    const stripped = lower.replace(
+      /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
+      '$1'
+    );
+    amountInMsg = stripped.match(/\b(\d{3,6})\b/);
+  }
 
   const ENTRY_KW = /\b(sales|revenue|bika|milk|bread|water|swiggy|zomato|phonepe|hyperpure|bigbasket|dmart|rent|electricity|gas|salary|pg|internet|garbage|repairs|marketing|misc|expense|kharch)\b/;
 
