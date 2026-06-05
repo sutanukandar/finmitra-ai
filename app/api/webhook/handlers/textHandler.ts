@@ -81,16 +81,22 @@ function preParseIntent(body: string): ParsedIntent | null {
   if (/\btrend\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
     const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
     let metric = 'sales';
-    if (/\bmilk\b/.test(lower))                      metric = 'milk';
-    else if (/\bbread\b/.test(lower))                metric = 'bread';
-    else if (/\bwater\b/.test(lower))                metric = 'water';
-    else if (/\bhyperpure\b/.test(lower))            metric = 'hyperpure';
-    else if (/bigbasket|big\s*basket/.test(lower))   metric = 'bigbasket';
-    else if (/\bdmart\b/.test(lower))                metric = 'dmart';
-    else if (/\bswiggy\b/.test(lower))               metric = 'swiggy';
-    else if (/\bzomato\b/.test(lower))               metric = 'zomato';
-    else if (/\bphonepe\b/.test(lower))              metric = 'phonepe';
-    else if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
+    if (/\bmilk\b/.test(lower))                                              metric = 'milk';
+    else if (/\bbread\b/.test(lower))                                        metric = 'bread';
+    else if (/\bwater\b/.test(lower))                                        metric = 'water';
+    else if (/\bhyperpure\b/.test(lower))                                    metric = 'hyperpure';
+    else if (/bigbasket|big\s*basket/.test(lower))                           metric = 'bigbasket';
+    else if (/\bdmart\b/.test(lower))                                        metric = 'dmart';
+    else if (/\bswiggy\b/.test(lower))                                       metric = 'swiggy';
+    else if (/\bzomato\b/.test(lower))                                       metric = 'zomato';
+    else if (/\bphonepe\b/.test(lower))                                      metric = 'phonepe';
+    else if (/total\s+expenses?|cogs\s*\+\s*fixed|total\s+cost/.test(lower)) metric = 'total_expenses';
+    else if (/expense|cost|cogs|kharch/.test(lower))                         metric = 'cogs';
+
+    // "this month" / "is mahine" with no explicit N-day range → this_month period
+    if (/this\s+month|is\s+mahine|mahine\s+ka/.test(lower) && !lastNMatch) {
+      return { intent: 'query_daily_breakdown', metric, period: 'this_month' };
+    }
     return { intent: 'query_daily_breakdown', metric, period: 'last_n_days', days };
   }
 

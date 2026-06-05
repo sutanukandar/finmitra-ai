@@ -580,10 +580,15 @@ ${vendorLines.join('\n')}`
         startDate    = `${parsed.month}-01`;
         endDate      = new Date(y, m, 0).toISOString().split('T')[0];
         periodLabel  = new Date(`${parsed.month}-01`).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+      } else if (parsed.period === 'this_month' || parsed.period === 'mtd') {
+        const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        startDate    = `${nowIST.getFullYear()}-${String(nowIST.getMonth() + 1).padStart(2, '0')}-01`;
+        endDate      = nowIST.toISOString().split('T')[0];
+        periodLabel  = `${nowIST.toLocaleString('en-IN', { month: 'long' })} ${nowIST.getFullYear()} (MTD)`;
       } else {
         startDate   = monthStart;
         endDate     = today;
-        periodLabel = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+        periodLabel = `${new Date(Date.now() + 5.5 * 60 * 60 * 1000).toLocaleString('en-IN', { month: 'long' })} (MTD)`;
       }
 
       const { data: entries } = await supabase
@@ -610,18 +615,45 @@ ${vendorLines.join('\n')}`
                  (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                  (Number(e.water) || 0) + (Number(e.other) || 0);
         if (metric === 'fixed')
-          return (Number(e.rent) || 0) + (Number(e.electricity) || 0) +
-                 (Number(e.salary) || 0) + (Number(e.fixed) || 0) +
-                 (Number(e.gas) || 0) + (Number(e.pg) || 0) +
-                 (Number(e.internet) || 0) + (Number(e.garbage) || 0) +
-                 (Number(e.repairs) || 0) + (Number(e.marketing) || 0) +
-                 (Number(e.misc) || 0);
+          return FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
+        if (metric === 'total_expenses') {
+          const itemCost = (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) + (Number(e.dmart) || 0) +
+                           (Number(e.milk) || 0) + (Number(e.bread) || 0) +
+                           (Number(e.water) || 0) + (Number(e.other) || 0);
+          const fixedCost = FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
+          return itemCost + fixedCost;
+        }
         return Number(e[metric]) || 0;
       };
 
-      const metricLabel = metric === 'sales' || metric === 'revenue'
-        ? 'Total Sales'
-        : metric.charAt(0).toUpperCase() + metric.slice(1);
+      const DAILY_METRIC_LABELS: Record<string, string> = {
+        sales:          'Total Sales',
+        revenue:        'Total Sales',
+        cogs:           'Item Cost (COGS)',
+        fixed:          'Fixed Costs',
+        total_expenses: 'Total Expenses',
+        milk:           'Milk',
+        bread:          'Bread',
+        water:          'Water',
+        hyperpure:      'Hyperpure',
+        bigbasket:      'BigBasket',
+        dmart:          'DMart',
+        other:          'Other Expenses',
+        swiggy:         'Swiggy',
+        zomato:         'Zomato',
+        phonepe:        'PhonePe',
+        rent:           'Rent',
+        salary:         'Salary',
+        electricity:    'Electricity',
+        gas:            'Gas',
+        pg:             'Staff PG',
+        internet:       'Internet',
+        garbage:        'Garbage',
+        repairs:        'Repairs',
+        marketing:      'Marketing',
+        misc:           'Misc',
+      };
+      const metricLabel = DAILY_METRIC_LABELS[metric] ?? (metric.charAt(0).toUpperCase() + metric.slice(1));
 
       const lines = (entries as any[])
         .map(e => ({

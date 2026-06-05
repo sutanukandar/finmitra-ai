@@ -304,11 +304,27 @@ MUST use query_daily_breakdown, NOT query_freeform or query_pnl.
 - "daily revenue for May"
   → {"intent": "query_daily_breakdown", "metric": "revenue", "period": "specific_month", "month": "2026-05"}
 - metric: any pnl column ("milk", "sales", "phonepe", "bigbasket", "hyperpure", "bread",
-  "water", "other", "rent", "salary") OR computed value "cogs" / "revenue" / "fixed"
-- period: "last_n_days" (requires days field) | "specific_month" (requires month field) | "mtd"
+  "water", "other", "rent", "salary") OR computed value "cogs" / "revenue" / "fixed" / "total_expenses"
+  - "total_expenses" = COGS + Fixed costs combined per day
+  - Use "cogs" for item/variable costs only; use "total_expenses" for all costs together
+- period: "last_n_days" | "specific_month" | "this_month" | "mtd"
 - days: number of days for last_n_days, default 7
 
 PERIOD RULES for query_daily_breakdown:
+
+0. "this month" / "is mahine" / "mahine ka" with no explicit N-day range
+   → period: "this_month"
+   Examples:
+   - "Daily expense trend for this month"
+     → {"intent": "query_daily_breakdown", "metric": "cogs", "period": "this_month"}
+   - "Daily sales trend for this month"
+     → {"intent": "query_daily_breakdown", "metric": "sales", "period": "this_month"}
+   - "Daily total COGS + Fixed expense trend for this month"
+     → {"intent": "query_daily_breakdown", "metric": "total_expenses", "period": "this_month"}
+   - "Total daily expenses this month"
+     → {"intent": "query_daily_breakdown", "metric": "total_expenses", "period": "this_month"}
+   - "Daily expense trend"  (no period specified — default to this_month)
+     → {"intent": "query_daily_breakdown", "metric": "total_expenses", "period": "this_month"}
 
 1. Relative range only ("last 7 days", "last 10 days", "past week") — no month mentioned
    → period: "last_n_days", days: N
