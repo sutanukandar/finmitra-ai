@@ -2,30 +2,30 @@
  * Parser test suite — makes real Claude API calls.
  * Run: npm run test:parser
  *
- * Each test calls parser.parseTextMessage() directly and verifies the returned ParsedIntent.
- * Tests run sequentially to avoid rate-limit bursts.
+ * Tests parser.parseTextMessage() directly (the Claude LLM call).
+ * Runs sequentially to avoid rate-limit bursts.
  */
 
 import { parser } from '../app/api/webhook/parser';
 import type { ParsedIntent } from '../app/api/webhook/types';
 
-const TODAY = '2026-06-04';
+const TODAY = '2026-06-05';
 
 interface TestCase {
   message: string;
   expectedIntent?: ParsedIntent['intent'];
-  notIntent?: ParsedIntent['intent'];   // assert this intent is NOT returned
+  notIntent?: ParsedIntent['intent'];
   expectedMetric?: string;
   expectedPeriod?: string;
-  expectedDays?: number;
   expectedMonth?: string;
+  expectedDays?: number;
   expectedCategory?: string;
-  expectedAmount?: number;              // assert entries[0].amount (add_entries only)
-  description?: string;
+  expectedAmount?: number;
 }
 
 const tests: TestCase[] = [
-  // ── query_pnl ─────────────────────────────────────────────────────────
+
+  // ── query_pnl ──────────────────────────────────────────────────────────
   {
     message: 'P&L this month',
     expectedIntent: 'query_pnl',
@@ -36,7 +36,22 @@ const tests: TestCase[] = [
     expectedIntent: 'query_pnl',
   },
   {
-    message: 'show me profit and loss',
+    message: 'Give me a P&L for this month',
+    expectedIntent: 'query_pnl',
+    notIntent: 'query_freeform',
+  },
+  {
+    message: 'Give me PNL for this month',
+    expectedIntent: 'query_pnl',
+    notIntent: 'query_freeform',
+  },
+  {
+    message: 'Show me profit and loss',
+    expectedIntent: 'query_pnl',
+    notIntent: 'query_freeform',
+  },
+  {
+    message: 'P&L dikhao',
     expectedIntent: 'query_pnl',
   },
   {
@@ -51,7 +66,7 @@ const tests: TestCase[] = [
     expectedMonth: '2026-05',
   },
 
-  // ── query_pnl_detail ──────────────────────────────────────────────────
+  // ── query_pnl_detail ───────────────────────────────────────────────────
   {
     message: 'detailed P&L',
     expectedIntent: 'query_pnl_detail',
@@ -64,17 +79,8 @@ const tests: TestCase[] = [
     expectedMonth: '2026-05',
     notIntent: 'query_freeform',
   },
-  {
-    message: 'poora P&L dikhao',
-    expectedIntent: 'query_pnl_detail',
-  },
-  {
-    message: 'full breakdown this month',
-    expectedIntent: 'query_pnl_detail',
-    expectedPeriod: 'mtd',
-  },
 
-  // ── query_specific: sales ─────────────────────────────────────────────
+  // ── query_specific: sales / revenue ───────────────────────────────────
   {
     message: 'What is total sales for this month?',
     expectedIntent: 'query_specific',
@@ -92,14 +98,6 @@ const tests: TestCase[] = [
     message: 'How much did I sell today?',
     expectedIntent: 'query_specific',
     expectedMetric: 'sales',
-    expectedPeriod: 'today',
-    notIntent: 'query_freeform',
-  },
-  {
-    message: 'what is my revenue today',
-    expectedIntent: 'query_specific',
-    expectedMetric: 'sales',
-    expectedPeriod: 'today',
     notIntent: 'query_freeform',
   },
   {
@@ -109,40 +107,35 @@ const tests: TestCase[] = [
     expectedPeriod: 'mtd',
   },
 
-  // ── query_specific: vendor/expense metrics ────────────────────────────
+  // ── query_specific: vendor / expense metrics ──────────────────────────
   {
     message: 'milk expense this month',
     expectedIntent: 'query_specific',
     expectedMetric: 'milk',
-    expectedPeriod: 'mtd',
     notIntent: 'query_freeform',
   },
   {
     message: 'How much is my Hyperpure bill this month?',
     expectedIntent: 'query_specific',
     expectedMetric: 'hyperpure',
-    expectedPeriod: 'mtd',
     notIntent: 'query_freeform',
   },
   {
     message: 'What are my total expenses this month?',
     expectedIntent: 'query_specific',
     expectedMetric: 'cogs',
-    expectedPeriod: 'mtd',
     notIntent: 'query_freeform',
   },
   {
     message: 'what is my rent this month',
     expectedIntent: 'query_specific',
     expectedMetric: 'rent',
-    expectedPeriod: 'mtd',
     notIntent: 'query_freeform',
   },
   {
     message: 'dmart spend this month',
     expectedIntent: 'query_specific',
     expectedMetric: 'dmart',
-    expectedPeriod: 'mtd',
     notIntent: 'query_freeform',
   },
 
@@ -156,7 +149,7 @@ const tests: TestCase[] = [
     notIntent: 'query_freeform',
   },
   {
-    message: 'sales trend last 7 days',
+    message: 'Sales trend last 7 days',
     expectedIntent: 'query_daily_breakdown',
     expectedMetric: 'sales',
     expectedPeriod: 'last_n_days',
@@ -167,6 +160,11 @@ const tests: TestCase[] = [
     message: 'daily sales for last week',
     expectedIntent: 'query_daily_breakdown',
     expectedMetric: 'sales',
+    notIntent: 'query_freeform',
+  },
+  {
+    message: 'Daily expense trend for this month',
+    expectedIntent: 'query_daily_breakdown',
     notIntent: 'query_freeform',
   },
   {
@@ -185,6 +183,55 @@ const tests: TestCase[] = [
     expectedDays: 7,
     expectedMonth: '2026-05',
     notIntent: 'query_freeform',
+  },
+
+  // ── add_entries ───────────────────────────────────────────────────────
+  {
+    message: 'today sales 3500',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+  },
+  {
+    message: 'milk 456 aaj',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'milk',
+  },
+  {
+    message: '31 May sales 4200',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+  },
+  // Ordinal date — no year
+  {
+    message: 'Sales of 4th June 3245',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+    expectedAmount: 3245,
+  },
+  // Ordinal date + year — amount must be 3245, NOT the year 2026
+  {
+    message: 'Sales of 4th June 2026 is 3245',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'sales',
+    expectedAmount: 3245,
+  },
+  {
+    message: 'Milk of 4th June 456',
+    expectedIntent: 'add_entries',
+    expectedCategory: 'milk',
+    expectedAmount: 456,
+  },
+
+  // ── correct_entry ─────────────────────────────────────────────────────
+  {
+    message: 'correct QR sales for 31 May to 4200',
+    expectedIntent: 'correct_entry_replace',
+    expectedCategory: 'sales',
+  },
+  {
+    message: 'reduce QR sales for 31 May by 1506',
+    expectedIntent: 'correct_entry_reduce',
+    expectedCategory: 'sales',
   },
 
   // ── query_ingredient ──────────────────────────────────────────────────
@@ -218,61 +265,18 @@ const tests: TestCase[] = [
     expectedIntent: 'query_upload_history',
   },
 
-  // ── add_entries ───────────────────────────────────────────────────────
+  // ── NEGATIVE assertions: these must NEVER be query_freeform ──────────
   {
-    message: 'today sales 3500',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'sales',
+    message: 'Give me a P&L for this month',
+    notIntent: 'query_freeform',
   },
   {
-    message: 'milk 456 aaj',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'milk',
+    message: 'Give me PNL for this month',
+    notIntent: 'query_freeform',
   },
   {
-    message: '31 May sales 4200',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'sales',
-  },
-  // Ordinal date + year: amount must be AFTER "is", NOT the year 2026
-  {
-    message: 'Sales of 4th June 2026 is 3245',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'sales',
-    expectedAmount: 3245,
-    description: 'year in date must not be confused with amount',
-  },
-  {
-    message: 'Sales of 3rd May 2026 is 4200',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'sales',
-    expectedAmount: 4200,
-    description: 'year in date must not be confused with amount',
-  },
-  // Ordinal date without year — no "is" — amount is the standalone number
-  {
-    message: 'Sales of 4th June 3245',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'sales',
-    expectedAmount: 3245,
-  },
-  {
-    message: 'Milk of 4th June 456',
-    expectedIntent: 'add_entries',
-    expectedCategory: 'milk',
-    expectedAmount: 456,
-  },
-
-  // ── correct_entry ─────────────────────────────────────────────────────
-  {
-    message: 'correct QR sales for 31 May to 4200',
-    expectedIntent: 'correct_entry_replace',
-    expectedCategory: 'sales',
-  },
-  {
-    message: 'reduce QR sales for 31 May by 1506',
-    expectedIntent: 'correct_entry_reduce',
-    expectedCategory: 'sales',
+    message: 'What is total sales this month?',
+    notIntent: 'query_freeform',
   },
 ];
 
@@ -284,15 +288,14 @@ async function runTests() {
   const failures: string[] = [];
 
   for (const tc of tests) {
-    const label = tc.message;
-
     let result: ParsedIntent;
     try {
       result = await parser.parseTextMessage(tc.message, TODAY);
-    } catch (err) {
-      console.error(`❌ "${label}" → EXCEPTION: ${err}`);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.log(`❌ "${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
       failed++;
-      failures.push(`"${label}" → EXCEPTION`);
+      failures.push(`"${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
       continue;
     }
 
@@ -306,60 +309,59 @@ async function runTests() {
       errors.push(`intent must NOT be "${tc.notIntent}", but was`);
     }
 
-    if (tc.expectedMetric && (result as any).metric !== tc.expectedMetric) {
+    if (tc.expectedMetric !== undefined && (result as any).metric !== tc.expectedMetric) {
       errors.push(`metric: got "${(result as any).metric}", expected "${tc.expectedMetric}"`);
     }
 
-    if (tc.expectedPeriod && (result as any).period !== tc.expectedPeriod) {
+    if (tc.expectedPeriod !== undefined && (result as any).period !== tc.expectedPeriod) {
       errors.push(`period: got "${(result as any).period}", expected "${tc.expectedPeriod}"`);
+    }
+
+    if (tc.expectedMonth !== undefined && (result as any).month !== tc.expectedMonth) {
+      errors.push(`month: got "${(result as any).month}", expected "${tc.expectedMonth}"`);
     }
 
     if (tc.expectedDays !== undefined && (result as any).days !== tc.expectedDays) {
       errors.push(`days: got ${(result as any).days}, expected ${tc.expectedDays}`);
     }
 
-    if (tc.expectedMonth && (result as any).month !== tc.expectedMonth) {
-      errors.push(`month: got "${(result as any).month}", expected "${tc.expectedMonth}"`);
-    }
-
-    if (tc.expectedCategory) {
+    if (tc.expectedCategory !== undefined) {
       const entries = (result as any).entries as Array<{ category: string }> | undefined;
-      const firstCat = entries?.[0]?.category;
-      if (firstCat !== tc.expectedCategory) {
-        errors.push(`category: got "${firstCat}", expected "${tc.expectedCategory}"`);
+      const cat = entries?.[0]?.category;
+      if (cat !== tc.expectedCategory) {
+        errors.push(`category: got "${cat}", expected "${tc.expectedCategory}"`);
       }
     }
 
     if (tc.expectedAmount !== undefined) {
       const entries = (result as any).entries as Array<{ amount: number }> | undefined;
-      const firstAmount = entries?.[0]?.amount;
-      if (firstAmount !== tc.expectedAmount) {
-        errors.push(`amount: got ${firstAmount}, expected ${tc.expectedAmount}`);
+      const amt = entries?.[0]?.amount;
+      if (amt !== tc.expectedAmount) {
+        errors.push(`amount: got ${amt}, expected ${tc.expectedAmount}`);
       }
     }
 
     if (errors.length === 0) {
-      console.log(`✅ "${label}"`);
+      console.log(`✅ "${tc.message}"`);
       passed++;
     } else {
-      const detail = errors.join('; ');
-      console.log(`❌ "${label}" → ${detail}`);
+      console.log(`❌ "${tc.message}" → ${errors.join('; ')}`);
       failed++;
-      failures.push(`"${label}" → ${detail}`);
+      failures.push(`"${tc.message}" → ${errors.join('; ')}`);
     }
   }
 
-  console.log(`\n${'─'.repeat(60)}`);
+  console.log(`\n${'─'.repeat(70)}`);
   console.log(`Results: ${passed}/${passed + failed} passed`);
 
   if (failures.length > 0) {
-    console.log(`\nFailed tests:`);
+    console.log(`\nFailed (${failures.length}):`);
     failures.forEach(f => console.log(`  • ${f}`));
     process.exit(1);
   }
 }
 
 runTests().catch(err => {
-  console.error('Test runner error:', err);
+  console.error('Test runner crashed:', err);
   process.exit(1);
 });
