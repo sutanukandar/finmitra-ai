@@ -289,15 +289,28 @@ async function runTests() {
 
   for (const tc of tests) {
     let result: ParsedIntent;
-    try {
-      result = await parser.parseTextMessage(tc.message, TODAY);
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      console.log(`❌ "${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
-      failed++;
-      failures.push(`"${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
-      continue;
+    let retries = 0;
+    while (true) {
+      try {
+        result = await parser.parseTextMessage(tc.message, TODAY);
+        break;
+      } catch (err: any) {
+        if (err?.status === 429 && retries < 3) {
+          const retryAfter = parseInt(err?.headers?.get?.('retry-after') || '30', 10);
+          const wait = (retryAfter + 2) * 1000;
+          console.log(`  ⏳ rate-limited — waiting ${retryAfter + 2}s before retry ${retries + 1}/3...`);
+          await new Promise(r => setTimeout(r, wait));
+          retries++;
+          continue;
+        }
+        const msg = err?.message || String(err);
+        console.log(`❌ "${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
+        failed++;
+        failures.push(`"${tc.message}" → EXCEPTION: ${msg.slice(0, 80)}`);
+        break;
+      }
     }
+    if (result! === undefined) continue;
 
     const errors: string[] = [];
 
