@@ -88,7 +88,34 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
-  // FIX v5: spPeriod now also detects "yesterday"/"kal"
+  // ── 0b. TODAY/AAJ ENTRY → add_entries ───────────────────────────────
+  // FIX v6: catches "today sales 1234", "aaj milk 456", "milk 456 aaj"
+  // (no ordinal date — simple today entry)
+  const hasTodayKw = /\b(today|aaj)\b/.test(lower);
+  const todayEntryAmtMatch = lower.match(/\b(\d{3,6})\b/);
+  if (hasTodayKw && todayEntryAmtMatch && ENTRY_KW.test(lower)) {
+    const amount = parseInt(todayEntryAmtMatch[1]);
+    const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const entryDate = nowIST.toISOString().split('T')[0];
+
+    let category = 'sales';
+    if (/\bmilk\b/.test(lower))                    category = 'milk';
+    else if (/\bbread\b/.test(lower))              category = 'bread';
+    else if (/\bwater\b/.test(lower))              category = 'water';
+    else if (/\bhyperpure\b/.test(lower))          category = 'hyperpure';
+    else if (/bigbasket|big\s*basket/.test(lower)) category = 'bigbasket';
+    else if (/\bdmart\b/.test(lower))              category = 'dmart';
+    else if (/\bswiggy\b/.test(lower))             category = 'swiggy';
+    else if (/\bzomato\b/.test(lower))             category = 'zomato';
+    else if (/\bphonepe\b/.test(lower))            category = 'phonepe';
+    else if (/\brent\b/.test(lower))               category = 'rent';
+    else if (/\bsalary\b/.test(lower))             category = 'salary';
+    else if (/expense|kharch/.test(lower))         category = 'other';
+
+    return { intent: 'add_entries', entries: [{ category, amount, date: entryDate }] };
+  }
+
+  // Period helper for simple queries
   const spPeriod: string | undefined =
     /\baaj\b|\btoday\b/.test(lower)     ? undefined :
     /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
@@ -179,6 +206,15 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
+  // ── 6. UPLOAD HISTORY → query_upload_history ────────────────────────
+  // FIX v6: catches "last bill uploaded", "recent uploads", "last Hyperpure bill"
+  if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b/.test(lower)) {
+    const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
+                   /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
+                   /\bdmart\b/.test(lower) ? 'dmart' : null;
+    return { intent: 'query_upload_history', vendor_filter: vendor, target: 'last' } as any;
+  }
+
   return null;
 }
 
@@ -205,6 +241,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         const hasDaily   = /\bdaily\b|\bdin\s+ka\b/.test(lower);
         const hasDayWise = /day[\s-]?wise|day\s+by\s+day/.test(lower);
 
+        // Safety 1: trend/daily
         if (hasTrend || hasDaily || hasDayWise || lastNMatch) {
           const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
           let metric = 'sales';
@@ -219,20 +256,58 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           else if (/\bphonepe\b/.test(lower))                   metric = 'phonepe';
           else if (/expense|cost|cogs|kharch/.test(lower))      metric = 'cogs';
 
-          console.log(`[TextHandler] Post-parser safety override → query_daily_breakdown metric=${metric} days=${days}`);
+          console.log(`[TextHandler] Post-parser safety → query_daily_breakdown metric=${metric} days=${days}`);
           parsed.intent = 'query_daily_breakdown' as any;
           (parsed as any).metric = metric;
           (parsed as any).period = 'last_n_days';
           (parsed as any).days   = days;
         }
 
+        // Safety 2: P&L
         else if (/p[&n]l\b|pnl|profit.*loss|loss.*profit/.test(lower)) {
-          console.log(`[TextHandler] Post-parser P&L safety override → query_pnl`);
+          console.log(`[TextHandler] Post-parser P&L safety → query_pnl`);
           const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
           parsed.intent = (isDetail ? 'query_pnl_detail' : 'query_pnl') as any;
           (parsed as any).period = /this\s+month|is\s+mahine/.test(lower) ? 'mtd' :
                                    /\baaj\b|\btoday\b/.test(lower) ? 'today' :
                                    /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
+        }
+
+        // Safety 3: FIX v6 — multi-month metric queries (last N months)
+        else if (/last\s+(\d+)\s+months?/.test(lower)) {
+          const nMatch  = lower.match(/last\s+(\d+)\s+months?/);
+          const nMonths = nMatch ? parseInt(nMatch[1]) : 3;
+          const nowIST  = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+          const months: string[] = [];
+          for (let i = nMonths - 1; i >= 0; i--) {
+            const d = new Date(nowIST.getFullYear(), nowIST.getMonth() - i - 1, 1);
+            months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+          }
+          let metric = 'sales';
+          if (/\bmilk\b/.test(lower))              metric = 'milk';
+          else if (/\bwater\b/.test(lower))        metric = 'water';
+          else if (/\bbread\b/.test(lower))        metric = 'bread';
+          else if (/\bhyperpure\b/.test(lower))    metric = 'hyperpure';
+          else if (/\bbigbasket\b/.test(lower))    metric = 'bigbasket';
+          else if (/\bdmart\b/.test(lower))        metric = 'dmart';
+          else if (/expense|cost|kharch/.test(lower)) metric = 'cogs';
+
+          console.log(`[TextHandler] Post-parser multi-month safety → query_specific metric=${metric} months=${months}`);
+          parsed.intent = 'query_specific' as any;
+          (parsed as any).metric = metric;
+          (parsed as any).period = 'multi_month';
+          (parsed as any).months = months;
+        }
+
+        // Safety 4: upload history
+        else if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b/.test(lower)) {
+          console.log(`[TextHandler] Post-parser upload history safety → query_upload_history`);
+          const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
+                         /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
+                         /\bdmart\b/.test(lower) ? 'dmart' : null;
+          parsed.intent = 'query_upload_history' as any;
+          (parsed as any).vendor_filter = vendor;
+          (parsed as any).target = 'last';
         }
       }
     }
