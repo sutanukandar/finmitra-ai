@@ -11,8 +11,8 @@ export function isInContext(message: string): boolean {
 
   // Allow if message contains financial keywords
   const financialKeywords = [
-    // Revenue
-    'sales', 'revenue', 'income', 'bika', 'bikri', 'kamai',
+    // Revenue — FIX: added sell, sold for "how much did I sell?"
+    'sales', 'revenue', 'income', 'bika', 'bikri', 'kamai', 'sell', 'sold',
     'phonepe', 'swiggy', 'zomato', 'cash', 'upi', 'payment',
     // Expenses
     'expense', 'kharch', 'kharcha', 'bill', 'invoice', 'cost',
@@ -24,9 +24,7 @@ export function isInContext(message: string): boolean {
     // P&L
     'p&l', 'pnl', 'profit', 'loss', 'margin', 'cogs',
     'balance', 'summary', 'report', 'hisaab', 'hisab',
-    // Queries — only explicitly financial time references; generic words
-    // like 'today', 'yesterday', 'how much', 'total', 'daily' removed to
-    // avoid false passes on unrelated questions (e.g. "IPL score yesterday")
+    // Queries
     'kitna', 'last month', 'this month',
     'march', 'april', 'june', 'july', 'august',
     'september', 'october', 'november', 'december', 'january', 'february',

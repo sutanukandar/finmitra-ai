@@ -12,7 +12,6 @@ const MONTH_NAME_TO_NUM: Record<string, number> = {
   nov: 11, november: 11, dec: 12, december: 12,
 };
 
-// Helper: extract specific month from message → "YYYY-MM" or null
 function extractSpecificMonth(lower: string): string | null {
   const m = lower.match(
     /\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s+(?:20)?(\d{2}))?\b/
@@ -27,32 +26,23 @@ function extractSpecificMonth(lower: string): string | null {
   return `${yr}-${String(mon).padStart(2, '0')}`;
 }
 
-// Helper: extract period intent from message for query_specific
-// Returns: { period, month? } or null to skip fast path
 function extractPeriodForSpecific(lower: string): { period: string; month?: string } | null {
-  // "last N months" — let the parser handle multi_month
   if (/last\s+\d+\s+months?/.test(lower)) return null;
-  // "last month"
   if (/last\s+month|pichle?\s+mahine?|prev(?:ious)?\s+month/.test(lower)) {
     return { period: 'last_month' };
   }
-  // "in May 2026", "for April 2026", "May 2026 ka", etc.
   const month = extractSpecificMonth(lower);
   if (month) return { period: 'specific_month', month };
-  // "today" / "aaj"
   if (/\baaj\b|\btoday\b/.test(lower)) return { period: 'today' };
-  // Default: MTD
   return { period: 'mtd' };
 }
 
-// Pre-parser fast path: deterministic routing BEFORE calling the Claude API.
 function preParseIntent(body: string): ParsedIntent | null {
   const lower = body.toLowerCase().trim();
 
   // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
 
-  // Handle "Rs X", "Rs. X", "₹X" prefix + allow 2-digit amounts like ₹40
   const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(?:rs\.?\s*|₹\s*)?(\d{2,6})\b/);
   let amountInMsg: RegExpMatchArray | null;
   if (explicitAmountMatch) {
@@ -98,9 +88,10 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
-  // Period helper for simple queries (MTD unless today)
+  // FIX v5: spPeriod now also detects "yesterday"/"kal"
   const spPeriod: string | undefined =
-    /\baaj\b|\btoday\b/.test(lower) ? undefined : 'mtd';
+    /\baaj\b|\btoday\b/.test(lower)     ? undefined :
+    /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
 
   // ── 1. TREND / LAST N DAYS / DAY-WISE → query_daily_breakdown ──────
   const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
@@ -134,6 +125,7 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (/this\s+month|is\s+mahine|mtd/.test(lower)) return { intent: 'query_pnl_detail', period: 'mtd' };
       if (/\baaj\b|\btoday\b/.test(lower))            return { intent: 'query_pnl_detail', period: 'today' };
       if (/\bkal\b|\byesterday\b/.test(lower))        return { intent: 'query_pnl_detail', period: 'yesterday' };
+      if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_pnl_detail', period: 'last_month' };
       if (month)                                       return { intent: 'query_pnl_detail', period: 'specific_month', month };
       return { intent: 'query_pnl_detail' };
     }
@@ -148,7 +140,6 @@ function preParseIntent(body: string): ParsedIntent | null {
 
   // ── 3. TOTAL SALES / REVENUE ────────────────────────────────────────
   if (/total\s+sales|\brevenue\b|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
-    // "last N months" → let parser handle
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'sales', period: 'last_month' };
     const month = extractSpecificMonth(lower);
@@ -166,11 +157,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 5. SPECIFIC METRIC QUESTIONS ────────────────────────────────────
-  // FIX v4: Extract period instead of defaulting to MTD or skipping entirely
-  // "last N months" → return null (let parser handle multi_month)
-  // "last month" → period: last_month
-  // "in May 2026" → period: specific_month
-  // default → period: mtd
   const metricMap: [RegExp, string][] = [
     [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
     [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
@@ -188,7 +174,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   for (const [pattern, metric] of metricMap) {
     if (pattern.test(lower)) {
       const periodInfo = extractPeriodForSpecific(lower);
-      // null means "last N months" — let parser handle
       if (periodInfo === null) return null;
       return { intent: 'query_specific', metric, ...periodInfo };
     }

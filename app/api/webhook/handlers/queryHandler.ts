@@ -28,6 +28,19 @@ const FIXED_THRESHOLD = 2000;
 
 const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, dmart, milk, bread, water, other, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
 
+// Helper: compute last month date range in IST
+function getLastMonthRange(): { startDate: string; endDate: string; periodLabel: string } {
+  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const lm     = new Date(nowIST.getFullYear(), nowIST.getMonth() - 1, 1);
+  const ly     = lm.getFullYear();
+  const lmm    = lm.getMonth() + 1;
+  return {
+    startDate:   `${ly}-${String(lmm).padStart(2, '0')}-01`,
+    endDate:     new Date(ly, lmm, 0).toISOString().split('T')[0],
+    periodLabel: lm.toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+  };
+}
+
 export async function handlePnlQuery(
   from: string,
   restaurantId: string,
@@ -35,8 +48,6 @@ export async function handlePnlQuery(
   parsed?: ParsedIntent
 ) {
   try {
-    // Use IST date — Vercel runs UTC; without offset early-morning queries
-    // return yesterday's date and the wrong day's data
     const today      = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
     const monthStart = today.slice(0, 7) + '-01';
     console.log(`[QueryHandler] intent=${parsed?.intent} period=${parsed?.period} today(IST)=${today}`);
@@ -131,6 +142,18 @@ export async function handlePnlQuery(
         startDate    = monthStart;
         endDate      = today;
         period_label = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
+      } else if (parsed.period === 'last_month') {
+        // FIX: handle last_month period
+        const lmr  = getLastMonthRange();
+        startDate    = lmr.startDate;
+        endDate      = lmr.endDate;
+        period_label = lmr.periodLabel;
+      } else if (parsed.period === 'yesterday') {
+        // FIX: handle yesterday period
+        const yest   = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000);
+        startDate    = yest.toISOString().split('T')[0];
+        endDate      = startDate;
+        period_label = 'Yesterday';
       } else {
         startDate    = today;
         endDate      = today;
@@ -185,7 +208,6 @@ export async function handlePnlQuery(
       } else if (parsed.metric === 'cogs') {
         reply = `${period_label} Expenses: ₹${cogs.toLocaleString('en-IN')}`;
       } else {
-        // Direct column query — hyperpure, bigbasket, milk, rent, swiggy, etc.
         const metric = parsed.metric ?? '';
         const total  = (entries as any[]).reduce(
           (s, e) => s + (Number(e[metric]) || 0), 0
@@ -252,13 +274,11 @@ export async function handlePnlQuery(
         return;
       }
 
-      // Apply vendor filter in JS
       const filtered = parsed.vendor_filter
         ? (items as any[]).filter((r: any) =>
             (r.vendor || '').toLowerCase().includes(parsed.vendor_filter))
         : (items as any[]);
 
-      // Aggregate by item_canonical
       const grouped: Record<string, { qty: number; unit: string; spend: number }> = {};
       filtered.forEach((r: any) => {
         const key = r.item_canonical as string;
@@ -328,7 +348,6 @@ export async function handlePnlQuery(
         endDate   = today;
       }
 
-      // ── Step 1: direct ILIKE probe ─────────────────────────────────────
       const { data: directProbe } = await supabase
         .from('invoice_items')
         .select('item_canonical')
@@ -336,7 +355,6 @@ export async function handlePnlQuery(
         .ilike('item_canonical', `%${ingredient}%`)
         .limit(1);
 
-      // ── Step 2: no direct match → ask Claude to resolve against known canonicals
       if (!directProbe || directProbe.length === 0) {
         const { data: allRows } = await supabase
           .from('invoice_items')
@@ -362,8 +380,6 @@ export async function handlePnlQuery(
             ? aiResponse.content[0].text.trim()
             : 'NO_MATCH';
 
-          console.log(`[QueryHandler] ingredient fuzzy resolve: "${ingredient}" → "${resolved}"`);
-
           if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) {
             await sendMessage(from,
               `No purchases found for "${ingredient}".\n\nKnown items: ${canonicalList.slice(0, 5).join(', ')}${canonicalList.length > 5 ? '…' : ''}`
@@ -384,7 +400,6 @@ export async function handlePnlQuery(
         .lte('date', endDate)
         .order('date', { ascending: true });
 
-      // Ingredients that can also appear as direct pnl_entries columns
       const pnlColumnMap: Record<string, string> = {
         milk:  'milk',
         bread: 'bread',
@@ -392,7 +407,6 @@ export async function handlePnlQuery(
       };
       const pnlColumn = pnlColumnMap[ingredient.toLowerCase()];
 
-      // Fetch pnl_entries total for milk/bread/water (WhatsApp/Excel direct entries)
       let pnlTotal = 0;
       if (pnlColumn) {
         const { data: pnlRows } = await supabase
@@ -424,7 +438,6 @@ export async function handlePnlQuery(
             `By source:\n  • Daily entries (WhatsApp/Excel): ₹${pnlTotal.toLocaleString('en-IN')}`
           );
         } else {
-          // Check if the item exists in any other period
           const { data: lastPurchase } = await supabase
             .from('invoice_items')
             .select('date, amount, quantity, unit, vendor')
@@ -753,7 +766,6 @@ ${vendorLines.join('\n')}`
       let detailStart: string, detailEnd: string, detailLabel: string;
 
       if (parsed.period && parsed.period !== 'from_context') {
-        // Period supplied directly — resolve same as query_pnl
         if (parsed.period === 'specific_month' && parsed.month) {
           const [y, m] = parsed.month.split('-').map(Number);
           detailStart  = `${parsed.month}-01`;
@@ -762,6 +774,12 @@ ${vendorLines.join('\n')}`
         } else if (parsed.period === 'yesterday') {
           detailStart = detailEnd = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
           detailLabel = 'Yesterday';
+        } else if (parsed.period === 'last_month') {
+          // FIX: handle last_month in query_pnl_detail
+          const lmr    = getLastMonthRange();
+          detailStart  = lmr.startDate;
+          detailEnd    = lmr.endDate;
+          detailLabel  = lmr.periodLabel;
         } else if (parsed.period === 'mtd') {
           detailStart = monthStart;
           detailEnd   = today;
@@ -771,7 +789,6 @@ ${vendorLines.join('\n')}`
           detailLabel = 'Today';
         }
       } else {
-        // No period — fall back to last pnl_context
         const { data: ctxRow } = await supabase
           .from('pending_confirmations')
           .select('payload')
@@ -813,6 +830,12 @@ ${vendorLines.join('\n')}`
       startDate   = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
       endDate     = startDate;
       periodLabel = 'Yesterday';
+    } else if (parsed?.intent === 'query_pnl' && parsed.period === 'last_month') {
+      // FIX: handle last_month in query_pnl summary
+      const lmr   = getLastMonthRange();
+      startDate   = lmr.startDate;
+      endDate     = lmr.endDate;
+      periodLabel = lmr.periodLabel;
     } else if (parsed?.intent === 'query_mtd' ||
                (parsed?.intent === 'query_pnl' && parsed.period === 'mtd') ||
                body.includes('this month') || body.includes('month')) {
@@ -841,10 +864,8 @@ ${vendorLines.join('\n')}`
       return;
     }
 
-    // Compute totals for Level 1 summary
     const totals = computePnlTotals(entries);
 
-    // Save context so "detail" can fetch the same period
     await dataService.createPendingConfirmation(restaurantId, {
       startDate, endDate: endDate || startDate, periodLabel
     }, 'pnl_context');
