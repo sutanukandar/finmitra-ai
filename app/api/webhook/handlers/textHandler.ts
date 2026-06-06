@@ -48,8 +48,7 @@ function extractPeriodForSpecific(lower: string): { period: string; month?: stri
 // Extract ingredient name from a multi-month query message
 // e.g. "monthly french fry expense for last 3 months" → "french fry"
 function extractIngredientFromMessage(lower: string): string | null {
-  const cleaned = lower
-    .replace(/\b(give|me|monthly|for|last|3|4|5|6|month|months|how|much|did|i|buy|spend|total|daily|week|weekly|what|is|my|are|the|expense|expenses|of|in|a|an)\b/g, ' ')
+  const cleaned = lower.replace(/\b(give|me|monthly|for|last|of|the|3|4|5|6|7|8|9|10|month|months|how|much|did|i|buy|spend|total|daily|week|weekly|what|is|my|are|the|expense|expenses|of|in|a|an)\b/g, ' ')
     .replace(/\d+/g, ' ')
     .replace(/\b(sales|revenue|cogs|expense|cost|kharch|hyperpure|bigbasket|dmart|swiggy|zomato|phonepe|rent|salary|electricity|gas|milk|bread|water|profit|loss|pnl)\b/g, ' ')
     .replace(/\s+/g, ' ')

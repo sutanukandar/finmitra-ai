@@ -69,37 +69,40 @@ async function handleMultiMonthIngredient(
 ) {
   console.log(`[QueryHandler] Multi-month ingredient: "${ingredient}" for ${months.join(', ')}`);
 
-  // Resolve canonical ingredient name
+  // Step 1: Try exact phrase ILIKE
   let resolvedIngredient = ingredient;
-  const { data: probe } = await supabase
+  const { data: exactProbe } = await supabase
     .from('invoice_items').select('item_canonical')
-    .eq('restaurant_id', restaurantId).ilike('item_canonical', `%${ingredient}%`).limit(1);
+    .eq('restaurant_id', restaurantId)
+    .ilike('item_canonical', `%${ingredient}%`)
+    .limit(1);
 
-  if (!probe || probe.length === 0) {
-    const { data: allRows } = await supabase
-      .from('invoice_items').select('item_canonical')
-      .eq('restaurant_id', restaurantId).not('item_canonical', 'is', null);
-
-    const canonicalList = [...new Set((allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean))];
-
-    if (canonicalList.length === 0) {
-      await sendMessage(from, `No bill data found. Upload bills first to track ingredient expenses.`);
+  if (!exactProbe || exactProbe.length === 0) {
+    // Step 2: Try each word individually (no Claude — avoids timeout)
+    const words = ingredient.split(' ').filter(w => w.length > 2);
+    let found = false;
+    for (const word of words) {
+      const { data: wordProbe } = await supabase
+        .from('invoice_items').select('item_canonical')
+        .eq('restaurant_id', restaurantId)
+        .ilike('item_canonical', `%${word}%`)
+        .limit(1);
+      if (wordProbe && wordProbe.length > 0) {
+        resolvedIngredient = (wordProbe[0] as any).item_canonical;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      const { data: allRows } = await supabase
+        .from('invoice_items').select('item_canonical')
+        .eq('restaurant_id', restaurantId).not('item_canonical', 'is', null);
+      const list = [...new Set((allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean))];
+      await sendMessage(from, `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${list.slice(0, 6).join(', ')}${list.length > 6 ? '…' : ''}`);
       return;
     }
-
-    const aiResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 50,
-      messages: [{ role: 'user', content: `The user asked about "${ingredient}". From this list: ${canonicalList.join(', ')}. Which best matches? Reply ONLY the exact name or "NO_MATCH".` }]
-    });
-    const resolved = aiResponse.content[0]?.type === 'text' ? aiResponse.content[0].text.trim() : 'NO_MATCH';
-
-    if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) {
-      await sendMessage(from,
-        `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${canonicalList.slice(0, 6).join(', ')}${canonicalList.length > 6 ? '…' : ''}`
-      );
-      return;
-    }
-    resolvedIngredient = resolved;
+  } else {
+    resolvedIngredient = (exactProbe[0] as any).item_canonical;
   }
 
   // Query each month in parallel
@@ -108,15 +111,12 @@ async function handleMultiMonthIngredient(
       const [y, m] = mo.split('-').map(Number);
       const startDate = `${mo}-01`;
       const endDate   = new Date(y, m, 0).toISOString().split('T')[0];
-
       const { data } = await supabase
         .from('invoice_items')
         .select('amount, quantity_normalised, unit_normalised')
         .eq('restaurant_id', restaurantId)
         .ilike('item_canonical', `%${resolvedIngredient}%`)
-        .gte('date', startDate)
-        .lte('date', endDate);
-
+        .gte('date', startDate).lte('date', endDate);
       const total = (data || []).reduce((s, r) => s + Number((r as any).amount || 0), 0);
       const qty   = (data || []).reduce((s, r) => s + Number((r as any).quantity_normalised || 0), 0);
       const unit  = data && data.length > 0 ? ((data[0] as any).unit_normalised || '') : '';
@@ -131,9 +131,7 @@ async function handleMultiMonthIngredient(
   const lines = monthlyResults.map(({ mo, total, qty }) => {
     const monthLabel = new Date(mo + '-01').toLocaleString('en-IN', { month: 'short', year: 'numeric' });
     const qtyStr = hasQty && qty > 0 ? ` (${qty.toFixed(1)} ${unit})` : '';
-    return total > 0
-      ? `${monthLabel}: ₹${Math.round(total).toLocaleString('en-IN')}${qtyStr}`
-      : `${monthLabel}: No purchases`;
+    return total > 0 ? `${monthLabel}: ₹${Math.round(total).toLocaleString('en-IN')}${qtyStr}` : `${monthLabel}: No purchases`;
   });
 
   const label = resolvedIngredient.charAt(0).toUpperCase() + resolvedIngredient.slice(1);
@@ -141,7 +139,6 @@ async function handleMultiMonthIngredient(
     `📦 *${label} — Last ${months.length} Months*\n\n${lines.join('\n')}\n\nTotal: ₹${Math.round(grandTotal).toLocaleString('en-IN')}`
   );
 }
-
 export async function handlePnlQuery(
   from: string,
   restaurantId: string,
