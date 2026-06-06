@@ -15,25 +15,34 @@ const MONTH_NAME_TO_NUM: Record<string, number> = {
 // Helper: extract specific month from message → "YYYY-MM" or null
 function extractSpecificMonth(lower: string): string | null {
   const m = lower.match(
-    /(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s*(?:20)?(\d{2})/
+    /\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s+(?:20)?(\d{2}))?\b/
+  ) || lower.match(
+    /(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s*(?:20)?(\d{2})\b/
   );
   if (!m) return null;
-  const mon = MONTH_NAME_TO_NUM[m[1].slice(0, 3)];
+  const monKey = m[1].slice(0, 3);
+  const mon = MONTH_NAME_TO_NUM[monKey];
   if (!mon) return null;
-  const yr = m[2].length === 2 ? 2000 + parseInt(m[2]) : parseInt(m[2]);
+  const yr = m[2] ? (m[2].length === 2 ? 2000 + parseInt(m[2]) : parseInt(m[2])) : new Date().getFullYear();
   return `${yr}-${String(mon).padStart(2, '0')}`;
 }
 
-// Helper: does the message reference a non-MTD period?
-// If true, the fast path should NOT intercept — let the parser handle it.
-function hasNonMtdPeriod(lower: string): boolean {
-  return (
-    /last\s+month|pichle?\s+mahine?|prev(?:ious)?\s+month/.test(lower) ||
-    /in\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)/i.test(lower) ||
-    /last\s+\d+\s+months?/.test(lower) ||
-    /for\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)/i.test(lower) ||
-    extractSpecificMonth(lower) !== null
-  );
+// Helper: extract period intent from message for query_specific
+// Returns: { period, month? } or null to skip fast path
+function extractPeriodForSpecific(lower: string): { period: string; month?: string } | null {
+  // "last N months" — let the parser handle multi_month
+  if (/last\s+\d+\s+months?/.test(lower)) return null;
+  // "last month"
+  if (/last\s+month|pichle?\s+mahine?|prev(?:ious)?\s+month/.test(lower)) {
+    return { period: 'last_month' };
+  }
+  // "in May 2026", "for April 2026", "May 2026 ka", etc.
+  const month = extractSpecificMonth(lower);
+  if (month) return { period: 'specific_month', month };
+  // "today" / "aaj"
+  if (/\baaj\b|\btoday\b/.test(lower)) return { period: 'today' };
+  // Default: MTD
+  return { period: 'mtd' };
 }
 
 // Pre-parser fast path: deterministic routing BEFORE calling the Claude API.
@@ -43,7 +52,7 @@ function preParseIntent(body: string): ParsedIntent | null {
   // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
 
-  // FIX: Handle "Rs X", "Rs. X", "₹X" prefix + allow 2-digit amounts like ₹40
+  // Handle "Rs X", "Rs. X", "₹X" prefix + allow 2-digit amounts like ₹40
   const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(?:rs\.?\s*|₹\s*)?(\d{2,6})\b/);
   let amountInMsg: RegExpMatchArray | null;
   if (explicitAmountMatch) {
@@ -53,7 +62,6 @@ function preParseIntent(body: string): ParsedIntent | null {
       /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
       '$1'
     );
-    // FIX: Allow 2-digit amounts (₹40, ₹80 etc.)
     amountInMsg = stripped.match(/\b(\d{2,6})\b/);
   }
 
@@ -90,7 +98,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
-  // Period helper for query_specific (MTD unless "today"/"aaj")
+  // Period helper for simple queries (MTD unless today)
   const spPeriod: string | undefined =
     /\baaj\b|\btoday\b/.test(lower) ? undefined : 'mtd';
 
@@ -130,49 +138,59 @@ function preParseIntent(body: string): ParsedIntent | null {
       return { intent: 'query_pnl_detail' };
     }
 
-    if (/\baaj\b|\btoday\b/.test(lower))            return { intent: 'query_pnl', period: 'today' };
-    if (/\bkal\b|\byesterday\b/.test(lower))        return { intent: 'query_pnl', period: 'yesterday' };
+    if (/\baaj\b|\btoday\b/.test(lower))              return { intent: 'query_pnl', period: 'today' };
+    if (/\bkal\b|\byesterday\b/.test(lower))          return { intent: 'query_pnl', period: 'yesterday' };
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_pnl', period: 'last_month' };
-    if (/this\s+month|is\s+mahine|mtd/.test(lower)) return { intent: 'query_pnl', period: 'mtd' };
-    if (month)                                       return { intent: 'query_pnl', period: 'specific_month', month };
+    if (/this\s+month|is\s+mahine|mtd/.test(lower))  return { intent: 'query_pnl', period: 'mtd' };
+    if (month)                                         return { intent: 'query_pnl', period: 'specific_month', month };
     return { intent: 'query_pnl', period: 'mtd' };
   }
 
   // ── 3. TOTAL SALES / REVENUE ────────────────────────────────────────
-  // FIX: Added \brevenue\b to catch "revenue this month"
   if (/total\s+sales|\brevenue\b|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
-    // If non-MTD period mentioned, let the parser handle it
-    if (hasNonMtdPeriod(lower)) return null;
+    // "last N months" → let parser handle
+    if (/last\s+\d+\s+months?/.test(lower)) return null;
+    if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'sales', period: 'last_month' };
+    const month = extractSpecificMonth(lower);
+    if (month) return { intent: 'query_specific', metric: 'sales', period: 'specific_month', month };
     return { intent: 'query_specific', metric: 'sales', period: spPeriod };
   }
 
   // ── 4. TOTAL EXPENSES / COGS ─────────────────────────────────────────
   if (/total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
-    if (hasNonMtdPeriod(lower)) return null;
+    if (/last\s+\d+\s+months?/.test(lower)) return null;
+    if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'cogs', period: 'last_month' };
+    const month = extractSpecificMonth(lower);
+    if (month) return { intent: 'query_specific', metric: 'cogs', period: 'specific_month', month };
     return { intent: 'query_specific', metric: 'cogs', period: 'mtd' };
   }
 
   // ── 5. SPECIFIC METRIC QUESTIONS ────────────────────────────────────
-  // FIX: Skip fast path for non-MTD periods — let parser extract the correct period
-  if (!hasNonMtdPeriod(lower)) {
-    const metricMap: [RegExp, string][] = [
-      [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
-      [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
-      [/how\s+much.*\bwater\b|water.*(?:expense|cost)/,                                  'water'],
-      [/how\s+much.*hyperpure|hyperpure.*(?:bill|expense|cost|total|ka\s+kitna)/,        'hyperpure'],
-      [/how\s+much.*bigbasket|bigbasket.*(?:bill|expense|cost|total)/,                   'bigbasket'],
-      [/how\s+much.*\bdmart\b|dmart.*(?:bill|expense|cost|total)/,                       'dmart'],
-      [/how\s+much.*\brent\b|what\s+is.*rent/,                                           'rent'],
-      [/how\s+much.*\bswiggy\b|swiggy.*(?:total|income|revenue)/,                        'swiggy'],
-      [/how\s+much.*\bzomato\b|zomato.*(?:total|income|revenue)/,                        'zomato'],
-      [/how\s+much.*\bphonepe\b|phonepe.*(?:total|income|revenue)/,                      'phonepe'],
-      [/how\s+much.*(?:salary|wages)|salary.*(?:this\s+month|is\s+mahine)/,              'salary'],
-      [/how\s+much.*electricity|electricity.*(?:bill|total)/,                             'electricity'],
-    ];
-    for (const [pattern, metric] of metricMap) {
-      if (pattern.test(lower)) {
-        return { intent: 'query_specific', metric, period: 'mtd' };
-      }
+  // FIX v4: Extract period instead of defaulting to MTD or skipping entirely
+  // "last N months" → return null (let parser handle multi_month)
+  // "last month" → period: last_month
+  // "in May 2026" → period: specific_month
+  // default → period: mtd
+  const metricMap: [RegExp, string][] = [
+    [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
+    [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
+    [/how\s+much.*\bwater\b|water.*(?:expense|cost)/,                                  'water'],
+    [/how\s+much.*hyperpure|hyperpure.*(?:bill|expense|cost|total|ka\s+kitna)/,        'hyperpure'],
+    [/how\s+much.*bigbasket|bigbasket.*(?:bill|expense|cost|total)/,                   'bigbasket'],
+    [/how\s+much.*\bdmart\b|dmart.*(?:bill|expense|cost|total)/,                       'dmart'],
+    [/how\s+much.*\brent\b|what\s+is.*rent/,                                           'rent'],
+    [/how\s+much.*\bswiggy\b|swiggy.*(?:total|income|revenue)/,                        'swiggy'],
+    [/how\s+much.*\bzomato\b|zomato.*(?:total|income|revenue)/,                        'zomato'],
+    [/how\s+much.*\bphonepe\b|phonepe.*(?:total|income|revenue)/,                      'phonepe'],
+    [/how\s+much.*(?:salary|wages)|salary.*(?:this\s+month|is\s+mahine)/,              'salary'],
+    [/how\s+much.*electricity|electricity.*(?:bill|total)/,                             'electricity'],
+  ];
+  for (const [pattern, metric] of metricMap) {
+    if (pattern.test(lower)) {
+      const periodInfo = extractPeriodForSpecific(lower);
+      // null means "last N months" — let parser handle
+      if (periodInfo === null) return null;
+      return { intent: 'query_specific', metric, ...periodInfo };
     }
   }
 
