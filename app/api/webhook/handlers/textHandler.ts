@@ -20,7 +20,8 @@ function preParseIntent(body: string): ParsedIntent | null {
   // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
 
-  const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(\d{3,6})\b/);
+  // FIX: Handle "Rs X", "Rs. X", "₹X" prefix + allow 2-digit amounts like ₹40
+  const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(?:rs\.?\s*|₹\s*)?(\d{2,6})\b/);
   let amountInMsg: RegExpMatchArray | null;
   if (explicitAmountMatch) {
     amountInMsg = explicitAmountMatch;
@@ -29,7 +30,8 @@ function preParseIntent(body: string): ParsedIntent | null {
       /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
       '$1'
     );
-    amountInMsg = stripped.match(/\b(\d{3,6})\b/);
+    // FIX: Allow 2-digit amounts (₹40, ₹80, etc.)
+    amountInMsg = stripped.match(/\b(\d{2,6})\b/);
   }
 
   const ENTRY_KW = /\b(sales|revenue|bika|milk|bread|water|swiggy|zomato|phonepe|hyperpure|bigbasket|dmart|rent|electricity|gas|salary|pg|internet|garbage|repairs|marketing|misc|expense|kharch)\b/;
@@ -93,11 +95,10 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 2. P&L / PnL QUERIES → query_pnl or query_pnl_detail ───────────
-  // This catches ALL variants: "PnL", "P&L", "pnl", "profit and loss", etc.
+  // Catches ALL variants: "PnL", "P&L", "pnl", "profit and loss", etc.
   // MUST come before sales/expense checks to avoid mis-routing P&L as query_specific
   if (/p[&n]l\b|pnl|profit.*loss|loss.*profit|monthly\s+report|hisaab/.test(lower)) {
 
-    // Helper to extract month from message
     const extractMonth = (): string | null => {
       const monthMatch = lower.match(
         /(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s*(?:20)?(\d{2})/
@@ -125,13 +126,11 @@ function preParseIntent(body: string): ParsedIntent | null {
       return { intent: 'query_pnl_detail' };
     }
 
-    // 4-line summary
     const month = extractMonth();
     if (/\baaj\b|\btoday\b/.test(lower))       return { intent: 'query_pnl', period: 'today' };
     if (/\bkal\b|\byesterday\b/.test(lower))   return { intent: 'query_pnl', period: 'yesterday' };
     if (/this\s+month|is\s+mahine|mtd/.test(lower)) return { intent: 'query_pnl', period: 'mtd' };
     if (month) return { intent: 'query_pnl', period: 'specific_month', month };
-    // Default: MTD if no period mentioned
     return { intent: 'query_pnl', period: 'mtd' };
   }
 
@@ -175,7 +174,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
   try {
     const todayDate = new Date().toISOString().split('T')[0];
 
-    // Try pre-parser fast path first (no Claude call)
     const preOverride = preParseIntent(body);
     let parsed: ParsedIntent;
 
@@ -186,7 +184,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       parsed = await parser.parseTextMessage(body, todayDate);
       console.log(`[TextHandler] Parsed intent:`, parsed);
 
-      // Post-parser safety: backup for any trend/daily that slips through pre-parser
       if (parsed.intent === 'query_freeform' || parsed.intent === 'unknown') {
         const lower = body.toLowerCase();
         const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
@@ -215,7 +212,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           (parsed as any).days   = days;
         }
 
-        // Post-parser safety for P&L: if parser returned freeform/unknown for P&L query
         else if (/p[&n]l\b|pnl|profit.*loss|loss.*profit/.test(lower)) {
           console.log(`[TextHandler] Post-parser P&L safety override → query_pnl`);
           const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
@@ -241,7 +237,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         }
 
         const category = (entry.category || '').toLowerCase().trim();
-
         const pnlEntry: any = { date: finalDate };
 
         if (category === 'sales' || category === 'revenue' || category.includes('bika')) {
@@ -330,7 +325,6 @@ Reply *haan* to save anyway · *nahi* to cancel`;
       await handleFreeformQuery(from, restaurantId, parsed.question || body);
     }
     else {
-      // unknown / help — try freeform before giving up
       await handleFreeformQuery(from, restaurantId, body);
     }
 
