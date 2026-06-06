@@ -41,6 +41,21 @@ function getLastMonthRange(): { startDate: string; endDate: string; periodLabel:
   };
 }
 
+// Helper: get value for a specific metric from a pnl_entries row
+function getMetricValue(e: any, metric: string): number {
+  if (metric === 'sales' || metric === 'revenue') {
+    return (Number(e.sales)||0) + (Number(e.phonepe)||0) + (Number(e.swiggy)||0) + (Number(e.zomato)||0);
+  }
+  if (metric === 'cogs') {
+    return (Number(e.hyperpure)||0) + (Number(e.bigbasket)||0) + (Number(e.dmart)||0) +
+           (Number(e.milk)||0) + (Number(e.bread)||0) + (Number(e.water)||0) + (Number(e.other)||0);
+  }
+  if (metric === 'fixed') {
+    return FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
+  }
+  return Number(e[metric]) || 0;
+}
+
 export async function handlePnlQuery(
   from: string,
   restaurantId: string,
@@ -74,8 +89,11 @@ export async function handlePnlQuery(
         return;
       }
 
-      const byMonth: Record<string, { revenue: number; cogs: number; fixed: number }> = {};
-      parsed.months.forEach((mo: string) => { byMonth[mo] = { revenue: 0, cogs: 0, fixed: 0 }; });
+      // FIX: track per-metric value alongside revenue/cogs/fixed
+      const byMonth: Record<string, { revenue: number; cogs: number; fixed: number; value: number }> = {};
+      parsed.months.forEach((mo: string) => { byMonth[mo] = { revenue: 0, cogs: 0, fixed: 0, value: 0 }; });
+
+      const metric = parsed.metric ?? 'sales';
 
       entries.forEach((e: any) => {
         const mo = (e.date as string).slice(0, 7);
@@ -85,29 +103,9 @@ export async function handlePnlQuery(
         byMonth[mo].cogs    += (Number(e.hyperpure) || 0) + (Number(e.bigbasket) || 0) + (Number(e.dmart) || 0) +
                                (Number(e.milk) || 0) + (Number(e.bread) || 0) +
                                (Number(e.water) || 0) + (Number(e.other) || 0);
-        byMonth[mo].fixed   += FIXED_COLUMNS.reduce(
-          (s, { key }) => s + (Number(e[key]) || 0), 0
-        );
-      });
-
-      const lines = parsed.months.map((mo: string) => {
-        const d = byMonth[mo];
-        const monthLabel = new Date(mo + '-01').toLocaleString('en-IN', { month: 'short', year: 'numeric' });
-        if (parsed.metric === 'cogs_pct_revenue') {
-          const pct = d.revenue > 0 ? ((d.cogs / d.revenue) * 100).toFixed(1) : 'N/A';
-          return `${monthLabel}: ${pct}% (₹${Math.round(d.cogs).toLocaleString('en-IN')} ÷ ₹${Math.round(d.revenue).toLocaleString('en-IN')})`;
-        }
-        if (parsed.metric === 'gross_margin_pct') {
-          const gp  = d.revenue - d.cogs;
-          const pct = d.revenue > 0 ? ((gp / d.revenue) * 100).toFixed(1) : 'N/A';
-          return `${monthLabel}: ${pct}% (₹${Math.round(gp).toLocaleString('en-IN')})`;
-        }
-        if (parsed.metric === 'net_margin_pct') {
-          const np  = d.revenue - d.cogs - d.fixed;
-          const pct = d.revenue > 0 ? ((np / d.revenue) * 100).toFixed(1) : 'N/A';
-          return `${monthLabel}: ${pct}% (₹${Math.round(np).toLocaleString('en-IN')})`;
-        }
-        return `${monthLabel}: ₹${Math.round(d.revenue).toLocaleString('en-IN')}`;
+        byMonth[mo].fixed   += FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key]) || 0), 0);
+        // FIX: accumulate the specific requested metric
+        byMonth[mo].value   += getMetricValue(e, metric);
       });
 
       const metricLabel: Record<string, string> = {
@@ -115,11 +113,46 @@ export async function handlePnlQuery(
         gross_margin_pct: 'Gross Margin',
         net_margin_pct:   'Net Margin',
         sales:            'Revenue',
-        cogs:             'Expenses',
+        cogs:             'Item Cost',
+        milk:             'Milk',
+        bread:            'Bread',
+        water:            'Water',
+        hyperpure:        'Hyperpure',
+        bigbasket:        'BigBasket',
+        dmart:            'DMart',
+        swiggy:           'Swiggy',
+        zomato:           'Zomato',
+        phonepe:          'PhonePe',
+        rent:             'Rent',
+        salary:           'Salary',
+        electricity:      'Electricity',
+        gas:              'Gas',
+        other:            'Other',
       };
 
-      const metric = parsed.metric ?? '';
-      await sendMessage(from, `📊 *${metricLabel[metric] || metric}*\n\n${lines.join('\n')}`);
+      const lines = parsed.months.map((mo: string) => {
+        const d = byMonth[mo];
+        const monthLabel = new Date(mo + '-01').toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+        if (metric === 'cogs_pct_revenue') {
+          const pct = d.revenue > 0 ? ((d.cogs / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(d.cogs).toLocaleString('en-IN')} ÷ ₹${Math.round(d.revenue).toLocaleString('en-IN')})`;
+        }
+        if (metric === 'gross_margin_pct') {
+          const gp  = d.revenue - d.cogs;
+          const pct = d.revenue > 0 ? ((gp / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(gp).toLocaleString('en-IN')})`;
+        }
+        if (metric === 'net_margin_pct') {
+          const np  = d.revenue - d.cogs - d.fixed;
+          const pct = d.revenue > 0 ? ((np / d.revenue) * 100).toFixed(1) : 'N/A';
+          return `${monthLabel}: ${pct}% (₹${Math.round(np).toLocaleString('en-IN')})`;
+        }
+        // FIX: use d.value (the specific metric) instead of d.revenue
+        return `${monthLabel}: ₹${Math.round(d.value).toLocaleString('en-IN')}`;
+      });
+
+      const label = metricLabel[metric] || metric.charAt(0).toUpperCase() + metric.slice(1);
+      await sendMessage(from, `📊 *${label} — Last ${parsed.months.length} Months*\n\n${lines.join('\n')}`);
       return;
     }
 
@@ -143,13 +176,11 @@ export async function handlePnlQuery(
         endDate      = today;
         period_label = `${new Date().toLocaleString('en-IN', { month: 'long' })} so far`;
       } else if (parsed.period === 'last_month') {
-        // FIX: handle last_month period
-        const lmr  = getLastMonthRange();
+        const lmr    = getLastMonthRange();
         startDate    = lmr.startDate;
         endDate      = lmr.endDate;
         period_label = lmr.periodLabel;
       } else if (parsed.period === 'yesterday') {
-        // FIX: handle yesterday period
         const yest   = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000);
         startDate    = yest.toISOString().split('T')[0];
         endDate      = startDate;
@@ -775,7 +806,6 @@ ${vendorLines.join('\n')}`
           detailStart = detailEnd = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000).toISOString().split('T')[0];
           detailLabel = 'Yesterday';
         } else if (parsed.period === 'last_month') {
-          // FIX: handle last_month in query_pnl_detail
           const lmr    = getLastMonthRange();
           detailStart  = lmr.startDate;
           detailEnd    = lmr.endDate;
@@ -831,7 +861,6 @@ ${vendorLines.join('\n')}`
       endDate     = startDate;
       periodLabel = 'Yesterday';
     } else if (parsed?.intent === 'query_pnl' && parsed.period === 'last_month') {
-      // FIX: handle last_month in query_pnl summary
       const lmr   = getLastMonthRange();
       startDate   = lmr.startDate;
       endDate     = lmr.endDate;
