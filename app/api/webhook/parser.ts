@@ -118,9 +118,11 @@ Expected output:
   ]}
 
 CRITICAL RULE — P&L vs single-metric:
-- If the user says P&L, profit, loss, summary, report, hisaab → ALWAYS use intent: "query_pnl". Never query_specific.
+- If the user says P&L, PnL, pnl, profit, loss, summary, report, hisaab → ALWAYS use intent: "query_pnl". Never query_specific.
+- "PnL" (capital N lowercase L) is IDENTICAL to "P&L" — treat them exactly the same always.
+- "pnl", "PNL", "PnL", "P&L", "p&l" — ALL mean the same thing: query_pnl.
 - query_specific is ONLY for single-number questions: "how much is sales", "total expenses", "kitna bika".
-- When in doubt between query_pnl and query_specific: if the message contains P&L, report, or summary → query_pnl.
+- When in doubt between query_pnl and query_specific: if the message contains P&L, PnL, pnl, report, or summary → query_pnl.
 
 CRITICAL RULE — query_pnl vs query_pnl_detail:
 - If message contains ANY of: detailed, full, complete, itemwise, poora, breakdown → use query_pnl_detail (NOT query_pnl), and include period/month if mentioned.
@@ -135,6 +137,18 @@ For query_pnl — 4-line P&L summary (no detail words):
 - "show me March P&L" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
 - "March 2026 profit and loss" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-03"}
 - "kal ka P&L" → {"intent": "query_pnl", "period": "yesterday"}
+- "PnL for this month" → {"intent": "query_pnl", "period": "mtd"}
+- "PnL this month" → {"intent": "query_pnl", "period": "mtd"}
+- "PnL today" → {"intent": "query_pnl", "period": "today"}
+- "give me PnL" → {"intent": "query_pnl", "period": "mtd"}
+- "give me P&L for this month" → {"intent": "query_pnl", "period": "mtd"}
+- "PnL for June 2026" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-06"}
+- "PnL June" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-06"}
+- "PnL for June" → {"intent": "query_pnl", "period": "specific_month", "month": "2026-06"}
+- "pnl this month?" → {"intent": "query_pnl", "period": "mtd"}
+- "show PnL" → {"intent": "query_pnl", "period": "mtd"}
+- "monthly PnL" → {"intent": "query_pnl", "period": "mtd"}
+- "is mahine ka PnL" → {"intent": "query_pnl", "period": "mtd"}
 - period: "today" | "yesterday" | "mtd" | "specific_month"
 - month: "YYYY-MM" — only when period = "specific_month"
 
@@ -435,6 +449,7 @@ NEVER use query_freeform for:
 - Any query with "trend", "daily", "day-wise", "day by day" → use query_daily_breakdown
 - Any query with "last N days" or "past N days" → use query_daily_breakdown
 - Any single-metric question (sales, expenses, margin) → use query_specific
+- Any query containing P&L, PnL, pnl, profit, loss → use query_pnl or query_pnl_detail
 
 query_freeform is ONLY for open-ended analytical questions with no clear structured answer:
 - "which month had the highest COGS?" → {"intent": "query_freeform", "question": "which month had the highest COGS?"}
