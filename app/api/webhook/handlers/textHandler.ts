@@ -18,18 +18,13 @@ function preParseIntent(body: string): ParsedIntent | null {
   const lower = body.toLowerCase().trim();
 
   // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
-  // Catches "Sales of 4th June 3245", "milk 3rd May 456", "Expense of 2nd June 1200"
-  // Fires ONLY when: financial category + ordinal date + amount all present.
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
 
-  // Amount extraction: prefer explicit "is/was/= N" marker over first-number-wins.
-  // Without this, "Sales of 4th June 2026 is 3245" picks 2026 (the year) not 3245.
   const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(\d{3,6})\b/);
   let amountInMsg: RegExpMatchArray | null;
   if (explicitAmountMatch) {
     amountInMsg = explicitAmountMatch;
   } else {
-    // Strip year numbers (2020–2035) that follow a month name before searching for amount
     const stripped = lower.replace(
       /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
       '$1'
@@ -71,12 +66,10 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // Period helper for query_specific
-  // 'mtd' = this month; undefined = today (falls to else-branch in handler)
   const spPeriod: string | undefined =
     /\baaj\b|\btoday\b/.test(lower) ? undefined : 'mtd';
 
   // ── 1. TREND / LAST N DAYS / DAY-WISE → query_daily_breakdown ──────
-  // "daily" alone is intentionally excluded — "daily milk 200" is add_entries.
   const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
   if (/\btrend\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
     const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
@@ -93,24 +86,66 @@ function preParseIntent(body: string): ParsedIntent | null {
     else if (/total\s+expenses?|cogs\s*\+\s*fixed|total\s+cost/.test(lower)) metric = 'total_expenses';
     else if (/expense|cost|cogs|kharch/.test(lower))                         metric = 'cogs';
 
-    // "this month" / "is mahine" with no explicit N-day range → this_month period
     if (/this\s+month|is\s+mahine|mahine\s+ka/.test(lower) && !lastNMatch) {
       return { intent: 'query_daily_breakdown', metric, period: 'this_month' };
     }
     return { intent: 'query_daily_breakdown', metric, period: 'last_n_days', days };
   }
 
-  // ── 2. TOTAL SALES / REVENUE ────────────────────────────────────────
+  // ── 2. P&L / PnL QUERIES → query_pnl or query_pnl_detail ───────────
+  // This catches ALL variants: "PnL", "P&L", "pnl", "profit and loss", etc.
+  // MUST come before sales/expense checks to avoid mis-routing P&L as query_specific
+  if (/p[&n]l\b|pnl|profit.*loss|loss.*profit|monthly\s+report|hisaab/.test(lower)) {
+
+    // Helper to extract month from message
+    const extractMonth = (): string | null => {
+      const monthMatch = lower.match(
+        /(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s*(?:20)?(\d{2})/
+      );
+      if (!monthMatch) return null;
+      const monKey = monthMatch[1].slice(0, 3);
+      const mon    = MONTH_NAME_TO_NUM[monKey];
+      if (!mon) return null;
+      const yr = monthMatch[2].length === 2 ? 2000 + parseInt(monthMatch[2]) : parseInt(monthMatch[2]);
+      return `${yr}-${String(mon).padStart(2, '0')}`;
+    };
+
+    const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
+
+    if (isDetail) {
+      const month = extractMonth();
+      if (/this\s+month|is\s+mahine|mtd/.test(lower))
+        return { intent: 'query_pnl_detail', period: 'mtd' };
+      if (/\baaj\b|\btoday\b/.test(lower))
+        return { intent: 'query_pnl_detail', period: 'today' };
+      if (/\bkal\b|\byesterday\b/.test(lower))
+        return { intent: 'query_pnl_detail', period: 'yesterday' };
+      if (month)
+        return { intent: 'query_pnl_detail', period: 'specific_month', month };
+      return { intent: 'query_pnl_detail' };
+    }
+
+    // 4-line summary
+    const month = extractMonth();
+    if (/\baaj\b|\btoday\b/.test(lower))       return { intent: 'query_pnl', period: 'today' };
+    if (/\bkal\b|\byesterday\b/.test(lower))   return { intent: 'query_pnl', period: 'yesterday' };
+    if (/this\s+month|is\s+mahine|mtd/.test(lower)) return { intent: 'query_pnl', period: 'mtd' };
+    if (month) return { intent: 'query_pnl', period: 'specific_month', month };
+    // Default: MTD if no period mentioned
+    return { intent: 'query_pnl', period: 'mtd' };
+  }
+
+  // ── 3. TOTAL SALES / REVENUE ────────────────────────────────────────
   if (/total\s+sales|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
     return { intent: 'query_specific', metric: 'sales', period: spPeriod };
   }
 
-  // ── 3. TOTAL EXPENSES / COGS ─────────────────────────────────────────
+  // ── 4. TOTAL EXPENSES / COGS ─────────────────────────────────────────
   if (/total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     return { intent: 'query_specific', metric: 'cogs', period: 'mtd' };
   }
 
-  // ── 4. SPECIFIC METRIC QUESTIONS ────────────────────────────────────
+  // ── 5. SPECIFIC METRIC QUESTIONS ────────────────────────────────────
   const metricMap: [RegExp, string][] = [
     [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
     [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
@@ -145,7 +180,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
     let parsed: ParsedIntent;
 
     if (preOverride) {
-      console.log(`[TextHandler] Pre-parser fast path: intent=${preOverride.intent} metric=${preOverride.metric} period=${preOverride.period}`);
+      console.log(`[TextHandler] Pre-parser fast path: intent=${preOverride.intent} metric=${(preOverride as any).metric} period=${(preOverride as any).period}`);
       parsed = preOverride;
     } else {
       parsed = await parser.parseTextMessage(body, todayDate);
@@ -179,6 +214,16 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           (parsed as any).period = 'last_n_days';
           (parsed as any).days   = days;
         }
+
+        // Post-parser safety for P&L: if parser returned freeform/unknown for P&L query
+        else if (/p[&n]l\b|pnl|profit.*loss|loss.*profit/.test(lower)) {
+          console.log(`[TextHandler] Post-parser P&L safety override → query_pnl`);
+          const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
+          parsed.intent = (isDetail ? 'query_pnl_detail' : 'query_pnl') as any;
+          (parsed as any).period = /this\s+month|is\s+mahine/.test(lower) ? 'mtd' :
+                                   /\baaj\b|\btoday\b/.test(lower) ? 'today' :
+                                   /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
+        }
       }
     }
 
@@ -186,7 +231,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       let savedCount = 0;
 
       for (const entry of parsed.entries) {
-        // Prefer explicit date from parser; fall back to date_offset for relative references
         let finalDate: string;
         if (entry.date) {
           finalDate = entry.date;
@@ -207,14 +251,11 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         } else if (category === 'bigbasket' || category.includes('big basket') || category.includes('bbnow')) {
           pnlEntry.bigbasket = entry.amount || 0;
         } else {
-          // swiggy, zomato, milk, bread, water, phonepe, rent, etc. map directly
           pnlEntry[category] = entry.amount || 0;
         }
 
-        // Resolve the column name that was actually set
         const pnlColumn = Object.keys(pnlEntry).find(k => k !== 'date') || category;
 
-        // Duplicate check before saving
         const dupCheck = await dataService.checkDuplicateTextEntry(
           restaurantId, pnlColumn, finalDate, entry.amount || 0
         );
@@ -260,8 +301,6 @@ Reply *haan* to save anyway · *nahi* to cancel`;
           }
 
           await sendMessage(from, warnMsg);
-
-          // Stop processing further entries in this message
           break;
         }
 
@@ -272,12 +311,10 @@ Reply *haan* to save anyway · *nahi* to cancel`;
         savedCount++;
       }
 
-      // Multi-entry success (savedCount > 1 — individual saves already messaged above
-      // only for single-entry messages; send a summary if all entries saved cleanly)
       if (savedCount > 1) {
         await sendMessage(from, `✅ ${savedCount} entries saved successfully!`);
       }
-    } 
+    }
     else if (
       ['query_today','query_mtd','query_lastmonth',
        'query_specific','query_pnl','query_pnl_detail','query_items','query_ingredient',
