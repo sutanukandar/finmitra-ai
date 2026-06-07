@@ -1,0 +1,53 @@
+
+> finmitra-ai@0.1.0 test:parser
+> tsx --env-file=.env.local tests/parser.test.ts
+
+✅ "P&L this month"
+✅ "monthly report"
+✅ "Give me a P&L for this month"
+✅ "Give me PNL for this month"
+✅ "Show me profit and loss"
+✅ "P&L dikhao"
+✅ "aaj ka P&L"
+✅ "P&L for May 2026"
+✅ "detailed P&L"
+✅ "detailed PnL of May 2026"
+✅ "What is total sales for this month?"
+✅ "total sales this month"
+✅ "How much did I sell today?"
+✅ "revenue this month"
+✅ "milk expense this month"
+✅ "How much is my Hyperpure bill this month?"
+✅ "What are my total expenses this month?"
+✅ "what is my rent this month"
+✅ "dmart spend this month"
+✅ "Sales trend of last 7 days"
+✅ "Sales trend last 7 days"
+✅ "daily sales for last week"
+✅ "Daily expense trend for this month"
+✅ "milk expense trend last 30 days"
+✅ "Sales trend for first 7 days of May 2026"
+✅ "today sales 3500"
+✅ "milk 456 aaj"
+✅ "31 May sales 4200"
+✅ "Sales of 4th June 3245"
+✅ "Sales of 4th June 2026 is 3245"
+✅ "Milk of 4th June 456"
+❌ "correct QR sales for 31 May to 4200" → category: got "phonepe", expected "sales"
+❌ "reduce QR sales for 31 May by 1506" → category: got "phonepe", expected "sales"
+✅ "how much butter this month"
+✅ "potato purchased this month"
+✅ "Hyperpure breakdown"
+✅ "vendor wise expense this month"
+✅ "last bill uploaded"
+✅ "show recent uploads"
+✅ "Give me a P&L for this month"
+✅ "Give me PNL for this month"
+✅ "What is total sales this month?"
+
+──────────────────────────────────────────────────────────────────────
+Results: 40/42 passed
+
+Failed (2):
+  • "correct QR sales for 31 May to 4200" → category: got "phonepe", expected "sales"
+  • "reduce QR sales for 31 May by 1506" → category: got "phonepe", expected "sales"

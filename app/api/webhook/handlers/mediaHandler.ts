@@ -132,7 +132,7 @@ async function sendMessage(to: string, body: string) {
   );
 
   await twilio.messages.create({
-    from: 'whatsapp:+14155238886',
+    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
     to: `whatsapp:${to}`,
     body: body,
   });
