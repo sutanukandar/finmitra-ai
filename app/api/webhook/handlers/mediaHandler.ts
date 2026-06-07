@@ -7,12 +7,17 @@ export async function handleMediaUpload(
   mediaUrl: string,
   mediaType: string | null = null
 ) {
-  console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType || 'unknown'}`);
+  console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType || 'unknown'}, URL: ${mediaUrl?.substring(0, 60)}`);
 
   try {
     await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
 
+    // FIX: Log exactly what type is being passed to the parser
+    console.log(`[MediaHandler] Calling parser.parseMedia. mediaType=${mediaType}`);
+
     const parseResult = await parser.parseMedia(mediaUrl, mediaType);
+
+    console.log(`[MediaHandler] Parse result: success=${parseResult.success}, extracted length=${typeof parseResult.extracted === 'string' ? parseResult.extracted.length : 0}`);
 
     if (parseResult.success && parseResult.extracted) {
       const payload = { ...parseResult, mediaUrl };
@@ -84,12 +89,25 @@ Reply *haan* to save · *nahi* to cancel`
       }
 
     } else {
-      await sendMessage(from, "Sorry, I couldn't read this bill clearly.\nPlease type manually like: `hyperpure 2845`");
+      // FIX: Surface the actual error so we can diagnose the failure
+      const errDetail = typeof parseResult.extracted === 'string'
+        ? parseResult.extracted.substring(0, 150)
+        : 'No error detail available';
+
+      console.error(`[MediaHandler] Parse failed. Error: ${errDetail}`);
+
+      await sendMessage(from,
+`Sorry, I couldn't read this bill.
+
+Error: ${errDetail}
+
+Please type manually: hyperpure ${parseResult.total || '0'}`
+      );
     }
 
-  } catch (error) {
-    console.error("[MediaHandler] Critical error:", error);
-    await sendMessage(from, "Sorry, something went wrong while processing the bill.");
+  } catch (error: any) {
+    console.error("[MediaHandler] Critical error:", error?.message || error);
+    await sendMessage(from, `Sorry, something went wrong.\n\nError: ${String(error?.message || error).substring(0, 100)}\n\nPlease type manually: hyperpure 3482`);
   }
 }
 
