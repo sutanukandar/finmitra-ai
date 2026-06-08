@@ -16,6 +16,7 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  console.log('[Debug] TWILIO_WHATSAPP_NUMBER:', process.env.TWILIO_WHATSAPP_NUMBER);
   let from = '';
 
   try {
