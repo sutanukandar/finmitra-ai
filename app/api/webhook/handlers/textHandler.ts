@@ -225,7 +225,17 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_specific', metric: 'cogs', period: 'mtd' };
   }
 
-  // ── 5. SPECIFIC METRIC QUESTIONS ─────────────────────────────────────
+  // ── 5. UPLOAD HISTORY ─────────────────────────────────────────────────
+  // IMPORTANT: must be BEFORE metricMap — "bigbasket bill uploaded" matches
+  // bigbasket.*bill in metricMap, so upload queries must be caught first
+  if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b|\bwhen.*\b(bill|upload)\b|\buploaded\b/.test(lower)) {
+    const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
+                   /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
+                   /\bdmart\b/.test(lower) ? 'dmart' : null;
+    return { intent: 'query_upload_history', vendor_filter: vendor, target: 'last' } as any;
+  }
+
+  // ── 6. SPECIFIC METRIC QUESTIONS ─────────────────────────────────────
   const metricMap: [RegExp, string][] = [
     [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
     [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
@@ -246,14 +256,6 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (periodInfo === null) return null;
       return { intent: 'query_specific', metric, ...periodInfo };
     }
-  }
-
-  // ── 6. UPLOAD HISTORY ─────────────────────────────────────────────────
-  if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b/.test(lower)) {
-    const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
-                   /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
-                   /\bdmart\b/.test(lower) ? 'dmart' : null;
-    return { intent: 'query_upload_history', vendor_filter: vendor, target: 'last' } as any;
   }
 
   return null;
@@ -351,7 +353,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         }
 
         // Safety 4: upload history
-        else if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b/.test(lower)) {
+        else if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b|\bwhen.*\b(bill|upload)\b|\buploaded\b/.test(lower)) {
           const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
                          /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
                          /\bdmart\b/.test(lower) ? 'dmart' : null;
