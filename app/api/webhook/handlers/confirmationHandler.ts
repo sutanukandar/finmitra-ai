@@ -1,15 +1,27 @@
 import { dataService } from '../../../../lib/db/dataService';
+import { handleClassifyExpense } from './classifyExpenseHandler';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
   const lowerBody = body.toLowerCase().trim();
 
   try {
-    // Fetch pending first — needed for delete_pick check before haan/nahi
     const pending = await dataService.getPendingConfirmation(restaurantId);
     const action  = pending?.action || '';
 
-    // pnl_context is read-only context — never a haan/nahi confirmation
+    // pnl_context is read-only — never a haan/nahi confirmation
     if (action === 'pnl_context') return false;
+
+    // ── classify_expense: user answering 1/2 from ask-once flow ──────────
+    // Must be checked BEFORE the haan/nahi block so "1" and "2" are routed
+    if (action === 'classify_expense' && /^[12]$/.test(lowerBody)) {
+      const handled = await handleClassifyExpense(
+        from, restaurantId, lowerBody, pending!.payload
+      );
+      if (handled) {
+        await dataService.deletePendingConfirmation(restaurantId);
+        return true;
+      }
+    }
 
     // ── delete_pick: numeric selection (1 / 2 / 3) ───────────────────────
     if (action === 'delete_pick' && /^[123]$/.test(lowerBody)) {
@@ -48,41 +60,29 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
         return true;
       }
 
-      // ── confirm_delete: zero out the chosen column for that date ─────────
+      // ── confirm_delete ────────────────────────────────────────────────
       if (action === 'confirm_delete') {
         const { category, date, amount } = pending.payload || {};
-        console.log(`[ConfirmationHandler] Deleting ${category} ₹${amount} for ${date}`);
-
         await dataService.zeroPnlColumn(restaurantId, category, date);
-
         await dataService.writeAuditLog(restaurantId, {
-          action:          'delete',
-          date_affected:   date,
-          pnl_field:       category,
-          amount_reversed: amount,
+          action: 'delete', date_affected: date, pnl_field: category, amount_reversed: amount,
         });
-
         await sendMessage(from,
           `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.`
         );
 
-      // ── confirm_text_entry: duplicate text entry — accumulate on top ─────
+      // ── confirm_text_entry ────────────────────────────────────────────
       } else if (action === 'confirm_text_entry') {
-        const { category, date, amount } = pending.payload || {};
-        console.log(`[ConfirmationHandler] Text duplicate override: ${category} ₹${amount} for ${date}`);
-
-        const { newTotal } = await dataService.accumulatePnlEntry(restaurantId, category, date, amount);
-
+        const { category, date, amount, breakdownLabel } = pending.payload || {};
+        const { newTotal } = await dataService.accumulatePnlEntry(
+          restaurantId, category, date, amount, 'whatsapp', breakdownLabel
+        );
         await dataService.writeAuditLog(restaurantId, {
-          action:          'duplicate_override',
-          date_affected:   date,
-          pnl_field:       category,
-          amount_reversed: amount,
+          action: 'duplicate_override', date_affected: date, pnl_field: category, amount_reversed: amount,
         });
-
         await sendMessage(from, `✅ Saved. ${category} for ${formatDate(date)} is now ₹${newTotal}.`);
 
-      // ── confirm_bill: clean or duplicate bill — same save flow ───────────
+      // ── confirm_bill ──────────────────────────────────────────────────
       } else if (action === 'confirm_bill') {
         const parseResult = pending.payload;
 
@@ -90,9 +90,11 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           const vendorName = (parseResult.vendor || '').toLowerCase().trim();
           const today      = new Date().toISOString().split('T')[0];
           const entryDate  = parseResult.date || today;
+          const deliveryFee = parseResult.delivery_fee || 0;
+          const foodTotal   = (parseResult.total || 0) - deliveryFee;
 
           const pnlField =
-            vendorName.includes('hyperpure') || vendorName.includes('zomato') ? 'hyperpure'
+            vendorName.includes('hyperpure') || vendorName.includes('zomato hyperpure') ? 'hyperpure'
             : vendorName.includes('bigbasket') || vendorName.includes('big basket') ||
               vendorName.includes('bbnow') || vendorName.includes('bb now') ||
               vendorName.includes('innovative retail') ? 'bigbasket'
@@ -100,8 +102,8 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
               vendorName.includes('avenue e-commerce') || vendorName.includes('avenue e commerce') ? 'dmart'
             : 'other';
 
-          const deliveryFee = parseResult.delivery_fee || 0;
-          const foodTotal   = (parseResult.total || 0) - deliveryFee;
+          // Short display label for metadata breakdown (used when pnlField = 'other')
+          const vendorDisplayLabel = getDisplayVendor(parseResult.vendor || 'Other');
 
           const uploadRecordId = await dataService.createUploadRecord(restaurantId, {
             date:      entryDate,
@@ -121,21 +123,33 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
             uploadRecordId
           );
 
-          const totals: any = {};
-          if (pnlField === 'hyperpure')      totals.hyperpure = foodTotal;
-          else if (pnlField === 'bigbasket') totals.bigbasket = foodTotal;
-          else if (pnlField === 'dmart')     totals.dmart     = foodTotal;
-          else                               totals.other     = foodTotal;
-          if (deliveryFee > 0) totals.other = (totals.other || 0) + deliveryFee;
+          // FIX: use accumulatePnlEntry (not upsertPnlEntry) so:
+          // 1. Multiple bills on same day stack correctly (no overwrite)
+          // 2. Unknown vendor bills write to metadata.other_breakdown for P&L breakdown
+          if (pnlField === 'hyperpure') {
+            await dataService.accumulatePnlEntry(restaurantId, 'hyperpure', entryDate, foodTotal, 'whatsapp');
+          } else if (pnlField === 'bigbasket') {
+            await dataService.accumulatePnlEntry(restaurantId, 'bigbasket', entryDate, foodTotal, 'whatsapp');
+          } else if (pnlField === 'dmart') {
+            await dataService.accumulatePnlEntry(restaurantId, 'dmart', entryDate, foodTotal, 'whatsapp');
+          } else {
+            // Unknown vendor → 'other' column + write vendor label to metadata breakdown
+            await dataService.accumulatePnlEntry(
+              restaurantId, 'other', entryDate, foodTotal, 'whatsapp', vendorDisplayLabel
+            );
+          }
 
-          await dataService.upsertPnlEntry(restaurantId, { date: entryDate, ...totals });
+          // Delivery fee always goes to 'other' with its own label
+          if (deliveryFee > 0) {
+            await dataService.accumulatePnlEntry(
+              restaurantId, 'other', entryDate, deliveryFee, 'whatsapp', 'Delivery'
+            );
+          }
 
           if (parseResult.is_duplicate) {
             await dataService.writeAuditLog(restaurantId, {
-              action:          'duplicate_override',
-              date_affected:   entryDate,
-              pnl_field:       pnlField,
-              amount_reversed: parseResult.total || 0,
+              action: 'duplicate_override', date_affected: entryDate,
+              pnl_field: pnlField, amount_reversed: parseResult.total || 0,
             });
           }
 
@@ -150,39 +164,25 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
           await sendMessage(from, "✅ Saved! Your entry has been added to P&L.");
         }
 
-      // ── confirm_replace: SET the column to the new value ───────────────
+      // ── confirm_replace ───────────────────────────────────────────────
       } else if (action === 'confirm_replace') {
         const { category, date, old_amount, new_amount } = pending.payload || {};
-        console.log(`[ConfirmationHandler] Replacing ${category} ₹${old_amount} → ₹${new_amount} for ${date}`);
-
         await dataService.upsertPnlEntry(restaurantId, { date, [category]: new_amount });
-
         await dataService.writeAuditLog(restaurantId, {
-          action:          'correct_replace',
-          date_affected:   date,
-          pnl_field:       category,
-          amount_reversed: old_amount,
+          action: 'correct_replace', date_affected: date, pnl_field: category, amount_reversed: old_amount,
         });
-
         const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
         await sendMessage(from,
           `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
         );
 
-      // ── confirm_reduce: SET the column to the pre-computed lower value ──
+      // ── confirm_reduce ────────────────────────────────────────────────
       } else if (action === 'confirm_reduce') {
         const { category, date, old_amount, new_amount } = pending.payload || {};
-        console.log(`[ConfirmationHandler] Reducing ${category} ₹${old_amount} → ₹${new_amount} for ${date}`);
-
         await dataService.upsertPnlEntry(restaurantId, { date, [category]: new_amount });
-
         await dataService.writeAuditLog(restaurantId, {
-          action:          'correct_reduce',
-          date_affected:   date,
-          pnl_field:       category,
-          amount_reversed: old_amount,
+          action: 'correct_reduce', date_affected: date, pnl_field: category, amount_reversed: old_amount,
         });
-
         const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
         await sendMessage(from,
           `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
@@ -193,13 +193,15 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
       }
 
     } else {
-      // ── nahi / cancel ────────────────────────────────────────────────────
+      // ── nahi / cancel ─────────────────────────────────────────────────
       if (action === 'confirm_delete') {
         await sendMessage(from, "Cancelled. Nothing was deleted.");
       } else if (action === 'confirm_text_entry') {
         await sendMessage(from, "Cancelled. Nothing was saved.");
       } else if (action === 'confirm_replace' || action === 'confirm_reduce') {
         await sendMessage(from, "Cancelled. Nothing was changed.");
+      } else if (action === 'classify_expense') {
+        await sendMessage(from, "Cancelled. Entry was not saved.");
       } else {
         await sendMessage(from, "Cancelled. Bill was not saved.");
       }
@@ -213,6 +215,25 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
     await sendMessage(from, "Sorry, something went wrong while saving.");
     return true;
   }
+}
+
+// Convert full legal vendor name to a short display label for the P&L breakdown
+function getDisplayVendor(vendor: string): string {
+  const v = (vendor || '').toLowerCase();
+  if (v.includes('swiggy'))    return 'Swiggy Instamart';
+  if (v.includes('zepto'))     return 'Zepto';
+  if (v.includes('blinkit') || v.includes('grofers')) return 'Blinkit';
+  if (v.includes('dunzo'))     return 'Dunzo';
+  if (v.includes('geddit'))    return 'Geddit';
+  if (v.includes('jiomart'))   return 'JioMart';
+  if (v.includes('amazon'))    return 'Amazon';
+  if (v.includes('flipkart'))  return 'Flipkart';
+  // Strip common legal suffixes and capitalise first word
+  const cleaned = vendor
+    .replace(/\s+(private limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp|inc\.?|corp\.?)\s*$/i, '')
+    .trim();
+  // Return first two words max
+  return cleaned.split(/\s+/).slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 }
 
 function formatDate(isoDate: string): string {
