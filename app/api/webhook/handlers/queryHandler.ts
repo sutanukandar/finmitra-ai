@@ -69,40 +69,37 @@ async function handleMultiMonthIngredient(
 ) {
   console.log(`[QueryHandler] Multi-month ingredient: "${ingredient}" for ${months.join(', ')}`);
 
-  // Step 1: Try exact phrase ILIKE
+  // Resolve canonical ingredient name
   let resolvedIngredient = ingredient;
-  const { data: exactProbe } = await supabase
+  const { data: probe } = await supabase
     .from('invoice_items').select('item_canonical')
-    .eq('restaurant_id', restaurantId)
-    .ilike('item_canonical', `%${ingredient}%`)
-    .limit(1);
+    .eq('restaurant_id', restaurantId).ilike('item_canonical', `%${ingredient}%`).limit(1);
 
-  if (!exactProbe || exactProbe.length === 0) {
-    // Step 2: Try each word individually (no Claude — avoids timeout)
-    const words = ingredient.split(' ').filter(w => w.length > 2);
-    let found = false;
-    for (const word of words) {
-      const { data: wordProbe } = await supabase
-        .from('invoice_items').select('item_canonical')
-        .eq('restaurant_id', restaurantId)
-        .ilike('item_canonical', `%${word}%`)
-        .limit(1);
-      if (wordProbe && wordProbe.length > 0) {
-        resolvedIngredient = (wordProbe[0] as any).item_canonical;
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      const { data: allRows } = await supabase
-        .from('invoice_items').select('item_canonical')
-        .eq('restaurant_id', restaurantId).not('item_canonical', 'is', null);
-      const list = [...new Set((allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean))];
-      await sendMessage(from, `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${list.slice(0, 6).join(', ')}${list.length > 6 ? '…' : ''}`);
+  if (!probe || probe.length === 0) {
+    const { data: allRows } = await supabase
+      .from('invoice_items').select('item_canonical')
+      .eq('restaurant_id', restaurantId).not('item_canonical', 'is', null);
+
+    const canonicalList = [...new Set((allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean))];
+
+    if (canonicalList.length === 0) {
+      await sendMessage(from, `No bill data found. Upload bills first to track ingredient expenses.`);
       return;
     }
-  } else {
-    resolvedIngredient = (exactProbe[0] as any).item_canonical;
+
+    const aiResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 50,
+      messages: [{ role: 'user', content: `The user asked about "${ingredient}". From this list: ${canonicalList.join(', ')}. Which best matches? Reply ONLY the exact name or "NO_MATCH".` }]
+    });
+    const resolved = aiResponse.content[0]?.type === 'text' ? aiResponse.content[0].text.trim() : 'NO_MATCH';
+
+    if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) {
+      await sendMessage(from,
+        `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${canonicalList.slice(0, 6).join(', ')}${canonicalList.length > 6 ? '…' : ''}`
+      );
+      return;
+    }
+    resolvedIngredient = resolved;
   }
 
   // Query each month in parallel
@@ -111,12 +108,15 @@ async function handleMultiMonthIngredient(
       const [y, m] = mo.split('-').map(Number);
       const startDate = `${mo}-01`;
       const endDate   = new Date(y, m, 0).toISOString().split('T')[0];
+
       const { data } = await supabase
         .from('invoice_items')
         .select('amount, quantity_normalised, unit_normalised')
         .eq('restaurant_id', restaurantId)
         .ilike('item_canonical', `%${resolvedIngredient}%`)
-        .gte('date', startDate).lte('date', endDate);
+        .gte('date', startDate)
+        .lte('date', endDate);
+
       const total = (data || []).reduce((s, r) => s + Number((r as any).amount || 0), 0);
       const qty   = (data || []).reduce((s, r) => s + Number((r as any).quantity_normalised || 0), 0);
       const unit  = data && data.length > 0 ? ((data[0] as any).unit_normalised || '') : '';
@@ -131,7 +131,9 @@ async function handleMultiMonthIngredient(
   const lines = monthlyResults.map(({ mo, total, qty }) => {
     const monthLabel = new Date(mo + '-01').toLocaleString('en-IN', { month: 'short', year: 'numeric' });
     const qtyStr = hasQty && qty > 0 ? ` (${qty.toFixed(1)} ${unit})` : '';
-    return total > 0 ? `${monthLabel}: ₹${Math.round(total).toLocaleString('en-IN')}${qtyStr}` : `${monthLabel}: No purchases`;
+    return total > 0
+      ? `${monthLabel}: ₹${Math.round(total).toLocaleString('en-IN')}${qtyStr}`
+      : `${monthLabel}: No purchases`;
   });
 
   const label = resolvedIngredient.charAt(0).toUpperCase() + resolvedIngredient.slice(1);
@@ -139,6 +141,7 @@ async function handleMultiMonthIngredient(
     `📦 *${label} — Last ${months.length} Months*\n\n${lines.join('\n')}\n\nTotal: ₹${Math.round(grandTotal).toLocaleString('en-IN')}`
   );
 }
+
 export async function handlePnlQuery(
   from: string,
   restaurantId: string,
@@ -557,9 +560,26 @@ function computePnlTotals(entries: any[]) {
 function buildPnlBreakdown(entries: any[], periodLabel: string): string {
   const t = computePnlTotals(entries);
   const profit = t.revenue - t.cogs - t.fixedTotal;
+
+  // Aggregate metadata breakdowns across all days in the period
+  const otherBreakdown: Record<string, number> = {};
+  const miscBreakdown:  Record<string, number> = {};
+  for (const e of entries) {
+    const meta = (e.metadata || {}) as any;
+    for (const [k, v] of Object.entries((meta.other_breakdown || {}) as Record<string, number>)) {
+      otherBreakdown[k] = (otherBreakdown[k] || 0) + Number(v);
+    }
+    for (const [k, v] of Object.entries((meta.misc_breakdown || {}) as Record<string, number>)) {
+      miscBreakdown[k] = (miscBreakdown[k] || 0) + Number(v);
+    }
+  }
+
+  // Sales lines
   const revLines = [`QR / Online : ₹${Math.round(t.sales+t.phonepe).toLocaleString('en-IN')}`];
   if (t.swiggy) revLines.push(`Swiggy      : ₹${Math.round(t.swiggy).toLocaleString('en-IN')}`);
   if (t.zomato) revLines.push(`Zomato      : ₹${Math.round(t.zomato).toLocaleString('en-IN')}`);
+
+  // Item Cost lines — with metadata breakdown under Others
   const cogsLines: string[] = [];
   if (t.hyperpure) cogsLines.push(`Hyperpure   : ₹${Math.round(t.hyperpure).toLocaleString('en-IN')}`);
   if (t.bigbasket) cogsLines.push(`BigBasket   : ₹${Math.round(t.bigbasket).toLocaleString('en-IN')}`);
@@ -567,15 +587,50 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
   if (t.milk)      cogsLines.push(`Milk        : ₹${Math.round(t.milk).toLocaleString('en-IN')}`);
   if (t.bread)     cogsLines.push(`Bread       : ₹${Math.round(t.bread).toLocaleString('en-IN')}`);
   if (t.water)     cogsLines.push(`Water       : ₹${Math.round(t.water).toLocaleString('en-IN')}`);
-  if (t.other)     cogsLines.push(`Others      : ₹${Math.round(t.other).toLocaleString('en-IN')}`);
+  if (t.other) {
+    cogsLines.push(`Others      : ₹${Math.round(t.other).toLocaleString('en-IN')}`);
+    // Indented breakdown (sorted by amount descending)
+    for (const [label, amt] of Object.entries(otherBreakdown).sort((a,b) => b[1]-a[1])) {
+      const dl = label.charAt(0).toUpperCase() + label.slice(1);
+      cogsLines.push(`  • ${dl.padEnd(12)}: ₹${Math.round(amt).toLocaleString('en-IN')}`);
+    }
+  }
+
+  // Fixed Cost lines — with metadata breakdown under Others
   const fixedLines: string[] = [];
-  FIXED_COLUMNS.filter(({key})=>t.fixedTotals[key]>=FIXED_THRESHOLD).forEach(({key,label})=>fixedLines.push(`${label.padEnd(12)}: ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`));
+  FIXED_COLUMNS.filter(({key})=>t.fixedTotals[key]>=FIXED_THRESHOLD)
+    .forEach(({key,label})=>fixedLines.push(`${label.padEnd(12)}: ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`));
+
   const below = FIXED_COLUMNS.filter(({key})=>t.fixedTotals[key]>0&&t.fixedTotals[key]<FIXED_THRESHOLD);
-  if (below.length>0) { const ot=below.reduce((s,{key})=>s+t.fixedTotals[key],0); fixedLines.push(`Others      : ₹${Math.round(ot).toLocaleString('en-IN')} _(${below.map(({label,key})=>`${label} ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`).join(', ')})_`); }
-  return [`📊 *P&L Breakdown — ${periodLabel}*`,`\n💰 *Total Sales*\n${revLines.join('\n')}\n*Total      : ₹${Math.round(t.revenue).toLocaleString('en-IN')}*`,`\n🛒 *Item Cost (Raw Materials)*\n${cogsLines.length?cogsLines.join('\n'):'(none)'}\n*Total      : ₹${Math.round(t.cogs).toLocaleString('en-IN')}*`,`\n🏢 *Fixed Cost*\n${fixedLines.length?fixedLines.join('\n'):'(none)'}\n*Total      : ₹${Math.round(t.fixedTotal).toLocaleString('en-IN')}*`,`\n${profit>=0?`💵 *Profit  : ₹${Math.round(profit).toLocaleString('en-IN')}*`:`🔴 *Loss    : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`}`].join('\n');
+  const namedKeys = new Set(FIXED_COLUMNS.map(c=>c.key));
+  const extraMisc = Object.entries(miscBreakdown).filter(([k])=>!namedKeys.has(k));
+  const othersFixedTotal = below.reduce((s,{key})=>s+t.fixedTotals[key],0)
+                         + extraMisc.reduce((s,[,v])=>s+v,0);
+  if (othersFixedTotal > 0) {
+    fixedLines.push(`Others      : ₹${Math.round(othersFixedTotal).toLocaleString('en-IN')}`);
+    for (const {key,label} of below) {
+      fixedLines.push(`  • ${label.padEnd(12)}: ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`);
+    }
+    for (const [label,amt] of extraMisc.sort((a,b)=>b[1]-a[1])) {
+      const dl = label.charAt(0).toUpperCase() + label.slice(1);
+      fixedLines.push(`  • ${dl.padEnd(12)}: ₹${Math.round(amt).toLocaleString('en-IN')}`);
+    }
+  }
+
+  const profitLine = profit>=0
+    ? `💵 *Profit  : ₹${Math.round(profit).toLocaleString('en-IN')}*`
+    : `🔴 *Loss    : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`;
+
+  return [
+    `📊 *P&L Breakdown — ${periodLabel}*`,
+    `\n💰 *Total Sales*\n${revLines.join('\n')}\n*Total      : ₹${Math.round(t.revenue).toLocaleString('en-IN')}*`,
+    `\n🛒 *Item Cost (Raw Materials)*\n${cogsLines.length?cogsLines.join('\n'):'(none)'}\n*Total      : ₹${Math.round(t.cogs).toLocaleString('en-IN')}*`,
+    `\n🏢 *Fixed Cost*\n${fixedLines.length?fixedLines.join('\n'):'(none)'}\n*Total      : ₹${Math.round(t.fixedTotal).toLocaleString('en-IN')}*`,
+    `\n${profitLine}`,
+  ].join('\n');
 }
 
 async function sendMessage(to: string, body: string) {
   const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  await twilio.messages.create({ from: process.env.TWILIO_WHATSAPP_NUMBER as string, to: `whatsapp:${to}`, body });
+  await twilio.messages.create({ from: 'whatsapp:+14155238886', to: `whatsapp:${to}`, body });
 }

@@ -274,12 +274,17 @@ export const dataService = {
     return { isDuplicate: !!match, existingRecord: match || undefined };
   },
 
+  // ── Core entry accumulation ──────────────────────────────────────────
+  // breakdownLabel: if provided, also writes to metadata.other_breakdown
+  // or metadata.misc_breakdown so detailed P&L can show line items.
+  // Only applies when category is 'other' or 'misc'.
   async accumulatePnlEntry(
     restaurantId: string,
     category: string,
     date: string,
     amount: number,
-    source: 'whatsapp' | 'csv' | 'backfill' = 'whatsapp'
+    source: 'whatsapp' | 'csv' | 'backfill' = 'whatsapp',
+    breakdownLabel?: string   // e.g. "Zepto", "Packaging", "Pest Control"
   ): Promise<{ newTotal: number }> {
     const { data } = await supabase
       .from('pnl_entries')
@@ -291,10 +296,28 @@ export const dataService = {
     const existing = Number((data as any)?.[category] || 0);
     const newTotal = existing + amount;
 
+    // Build updated metadata
+    const meta = ((data as any)?.metadata || {}) as Record<string, any>;
+
+    // Source tracking (existing behaviour)
+    const sourceKey = `${category}_sources`;
+    const sources: string[] = meta[sourceKey] || [];
+    if (!sources.includes(source)) sources.push(source);
+    meta[sourceKey] = sources;
+
+    // Breakdown tracking (new: only for catch-all columns)
+    if (breakdownLabel && (category === 'other' || category === 'misc')) {
+      const bucketKey = category === 'other' ? 'other_breakdown' : 'misc_breakdown';
+      if (!meta[bucketKey]) meta[bucketKey] = {};
+      const labelKey = breakdownLabel.toLowerCase();
+      meta[bucketKey][labelKey] = (meta[bucketKey][labelKey] || 0) + amount;
+      console.log(`[dataService] Metadata breakdown: ${bucketKey}.${labelKey} += ${amount}`);
+    }
+
     const { error } = await supabase
       .from('pnl_entries')
       .upsert(
-        { restaurant_id: restaurantId, date, [category]: newTotal },
+        { restaurant_id: restaurantId, date, [category]: newTotal, metadata: meta },
         { onConflict: 'restaurant_id,date' }
       );
 
@@ -302,23 +325,129 @@ export const dataService = {
       console.error("[dataService] accumulatePnlEntry failed:", error);
       throw error;
     }
-    console.log(`[dataService] Accumulated ${category}: ${existing} + ${amount} = ${newTotal} for ${date} (source: ${source})`);
-
-    // Update source tracking in metadata
-    const meta = ((data as any)?.metadata || {}) as Record<string, string[]>;
-    const sourceKey = `${category}_sources`;
-    const sources = meta[sourceKey] || [];
-    if (!sources.includes(source)) {
-      sources.push(source);
-      meta[sourceKey] = sources;
-      await supabase
-        .from('pnl_entries')
-        .update({ metadata: meta })
-        .eq('restaurant_id', restaurantId)
-        .eq('date', date);
-    }
+    console.log(`[dataService] Accumulated ${category}: ${existing} + ${amount} = ${newTotal} for ${date} (source: ${source}${breakdownLabel ? `, label: ${breakdownLabel}` : ''})`);
 
     return { newTotal };
+  },
+
+  // ── Expense categories: custom classification per restaurant ─────────
+
+  async getExpenseCategory(
+    restaurantId: string,
+    categoryName: string
+  ): Promise<{ costType: 'item_cost' | 'fixed_cost'; pnlBucket: 'other' | 'misc'; displayLabel: string } | null> {
+    const { data } = await supabase
+      .from('expense_categories')
+      .select('cost_type, pnl_bucket, display_label')
+      .eq('restaurant_id', restaurantId)
+      .eq('category_name', categoryName.toLowerCase().trim())
+      .maybeSingle();
+
+    if (!data) return null;
+    return {
+      costType:     data.cost_type as 'item_cost' | 'fixed_cost',
+      pnlBucket:    data.pnl_bucket as 'other' | 'misc',
+      displayLabel: data.display_label,
+    };
+  },
+
+  async saveExpenseCategory(
+    restaurantId: string,
+    categoryName: string,
+    displayLabel: string,
+    costType: 'item_cost' | 'fixed_cost',
+    pnlBucket: 'other' | 'misc'
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('expense_categories')
+      .upsert({
+        restaurant_id: restaurantId,
+        category_name: categoryName.toLowerCase().trim(),
+        display_label: displayLabel,
+        cost_type:     costType,
+        pnl_bucket:    pnlBucket,
+        updated_at:    new Date().toISOString(),
+      }, { onConflict: 'restaurant_id,category_name' });
+
+    if (error) {
+      console.error("[dataService] saveExpenseCategory failed:", error);
+      throw error;
+    }
+    console.log(`[dataService] Saved expense category: ${categoryName} → ${costType} (${pnlBucket})`);
+  },
+
+  // ── Reclassify: move amount between pnl columns + update metadata ───
+
+  async reclassifyExpense(
+    restaurantId: string,
+    categoryName: string,           // e.g. "cylinder"
+    fromColumn: 'other' | 'misc',   // current wrong column
+    toColumn: string,               // correct column (e.g. 'gas', 'misc', 'other')
+    toBreakdownLabel: string | null, // label for toColumn breakdown (if toColumn is other/misc)
+    dateFilter?: { start: string; end: string }
+  ): Promise<{ rowsAffected: number; totalMoved: number }> {
+    // Fetch all rows that have this category in their metadata breakdown
+    let query = supabase
+      .from('pnl_entries')
+      .select('id, date, metadata, ' + fromColumn + ', ' + (toColumn !== fromColumn ? toColumn : ''))
+      .eq('restaurant_id', restaurantId);
+
+    if (dateFilter) {
+      query = query.gte('date', dateFilter.start).lte('date', dateFilter.end);
+    }
+
+    const { data: rows, error } = await query;
+    if (error || !rows) {
+      console.error("[dataService] reclassifyExpense fetch failed:", error);
+      throw error;
+    }
+
+    const breakdownKey = fromColumn === 'other' ? 'other_breakdown' : 'misc_breakdown';
+    const labelKey = categoryName.toLowerCase().trim();
+
+    let rowsAffected = 0;
+    let totalMoved = 0;
+
+    for (const row of rows as any[]) {
+      const meta = (row.metadata || {}) as any;
+      const breakdownAmount = meta[breakdownKey]?.[labelKey];
+      if (!breakdownAmount || breakdownAmount <= 0) continue;
+
+      // Remove from source
+      const fromCurrent = Number(row[fromColumn] || 0);
+      const newFromTotal = Math.max(0, fromCurrent - breakdownAmount);
+      delete meta[breakdownKey][labelKey];
+
+      // Add to destination
+      const toCurrent = Number(row[toColumn] || 0);
+      const newToTotal = toCurrent + breakdownAmount;
+
+      // Update destination breakdown if toColumn is also a catch-all
+      if (toBreakdownLabel && (toColumn === 'other' || toColumn === 'misc')) {
+        const toBucketKey = toColumn === 'other' ? 'other_breakdown' : 'misc_breakdown';
+        if (!meta[toBucketKey]) meta[toBucketKey] = {};
+        meta[toBucketKey][toBreakdownLabel.toLowerCase()] =
+          (meta[toBucketKey][toBreakdownLabel.toLowerCase()] || 0) + breakdownAmount;
+      }
+
+      const updatePayload: any = {
+        metadata: meta,
+        [fromColumn]: newFromTotal,
+      };
+      if (toColumn !== fromColumn) updatePayload[toColumn] = newToTotal;
+
+      await supabase
+        .from('pnl_entries')
+        .update(updatePayload)
+        .eq('restaurant_id', restaurantId)
+        .eq('date', row.date);
+
+      rowsAffected++;
+      totalMoved += breakdownAmount;
+    }
+
+    console.log(`[dataService] Reclassified ${categoryName}: moved ₹${totalMoved} across ${rowsAffected} rows from ${fromColumn} to ${toColumn}`);
+    return { rowsAffected, totalMoved };
   },
 
   async getTopItemsBySpend(
@@ -340,7 +469,6 @@ export const dataService = {
       return [];
     }
 
-    // Group by item_name in JS, merging across vendors
     const map = new Map<string, { vendors: Set<string>; total_spend: number; total_qty: number; times_purchased: number }>();
     for (const row of data as any[]) {
       const key = (row.item_name || 'Unknown').trim();

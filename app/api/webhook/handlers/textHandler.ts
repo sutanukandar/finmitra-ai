@@ -5,6 +5,7 @@ import { handlePnlQuery } from './queryHandler';
 import { handleFreeformQuery } from './queryFreeformHandler';
 import { handleCorrectEntry } from './correctEntryHandler';
 
+// ── Month name lookup ────────────────────────────────────────────────
 const MONTH_NAME_TO_NUM: Record<string, number> = {
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
   apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
@@ -12,6 +13,7 @@ const MONTH_NAME_TO_NUM: Record<string, number> = {
   nov: 11, november: 11, dec: 12, december: 12,
 };
 
+// ── Known pnl_entries columns ────────────────────────────────────────
 const PNL_COLUMNS = new Set([
   'sales', 'revenue', 'cogs', 'phonepe', 'swiggy', 'zomato',
   'hyperpure', 'bigbasket', 'dmart', 'milk', 'bread', 'water', 'other',
@@ -19,6 +21,158 @@ const PNL_COLUMNS = new Set([
   'garbage', 'repairs', 'marketing', 'misc', 'fixed',
 ]);
 
+// ── KEYWORD CLASSIFIER ───────────────────────────────────────────────
+// Maps a message keyword to a specific named pnl column (no metadata needed)
+// Order matters — more specific patterns first
+const DIRECT_COLUMN_KEYWORDS: Array<{ pattern: RegExp; column: string; label: string }> = [
+  // Revenue
+  { pattern: /\b(sales|revenue|bika|bikri)\b/, column: 'sales', label: 'Sales' },
+  { pattern: /\bswiggy\b/, column: 'swiggy', label: 'Swiggy' },
+  { pattern: /\bzomato\b/, column: 'zomato', label: 'Zomato' },
+  { pattern: /\bphonepe\b/, column: 'phonepe', label: 'PhonePe' },
+  // Item cost — named vendors
+  { pattern: /\bmilk\b|\bdoodh\b/, column: 'milk', label: 'Milk' },
+  { pattern: /\bbread\b/, column: 'bread', label: 'Bread' },
+  { pattern: /\bwater\b|\bbisleri\b/, column: 'water', label: 'Water' },
+  { pattern: /\bhyperpure\b/, column: 'hyperpure', label: 'Hyperpure' },
+  { pattern: /bigbasket|big\s*basket|\bbbnow\b/, column: 'bigbasket', label: 'BigBasket' },
+  { pattern: /\bdmart\b|d[\s-]mart/, column: 'dmart', label: 'DMart' },
+  // Fixed cost — named columns
+  { pattern: /\brent\b/, column: 'rent', label: 'Rent' },
+  { pattern: /\bsalary\b|\bwages\b/, column: 'salary', label: 'Salary' },
+  { pattern: /\belectricity\b|\bbijli\b/, column: 'electricity', label: 'Electricity' },
+  { pattern: /\bgas\b|\blpg\b|\bcylinder\b|\brefill\b/, column: 'gas', label: 'Gas' },
+  { pattern: /\bpg\b|\bstaff\s*pg\b/, column: 'pg', label: 'Staff PG' },
+  { pattern: /\binternet\b|\bwifi\b|\bbroadband\b/, column: 'internet', label: 'Internet' },
+  { pattern: /\bgarbage\b|\bwaste\s*col/, column: 'garbage', label: 'Garbage' },
+  { pattern: /\brepairs\b|\bmaintenance\b/, column: 'repairs', label: 'Repairs' },
+  { pattern: /\bmarketing\b|\bads\b|\badvertis/, column: 'marketing', label: 'Marketing' },
+];
+
+// Maps to 'other' (Item Cost catch-all) with metadata label
+const ITEM_COST_KEYWORDS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bpackaging\b|\bpacket\b/, label: 'Packaging' },
+  { pattern: /carry\s*bag/, label: 'Carry Bag' },
+  { pattern: /\btissue\b/, label: 'Tissue' },
+  { pattern: /\bnapkin\b/, label: 'Napkin' },
+  { pattern: /\bsabzi\b|\bvegetable\b|\bveggies?\b/, label: 'Vegetables' },
+  { pattern: /\bmandi\b/, label: 'Sabzi Mandi' },
+  { pattern: /\bmasala\b/, label: 'Masala' },
+  { pattern: /\bspice\b|\bspices\b/, label: 'Spices' },
+  { pattern: /\bpaneer\b/, label: 'Paneer' },
+  { pattern: /\bchicken\b/, label: 'Chicken' },
+  { pattern: /\bfish\b/, label: 'Fish' },
+  { pattern: /\begg\b|\beggs\b/, label: 'Eggs' },
+  { pattern: /\bflour\b|\bmaida\b|\batta\b/, label: 'Flour' },
+  { pattern: /\brice\b/, label: 'Rice' },
+  { pattern: /\bdal\b/, label: 'Dal' },
+  { pattern: /\bzepto\b/, label: 'Zepto' },
+  { pattern: /\bblinkit\b/, label: 'Blinkit' },
+  { pattern: /instamart/, label: 'Instamart' },
+  { pattern: /\bdunzo\b/, label: 'Dunzo' },
+  { pattern: /cooking\s*oil|\boil\b/, label: 'Cooking Oil' },
+  { pattern: /\bsugar\b/, label: 'Sugar' },
+  { pattern: /\bsalt\b/, label: 'Salt' },
+  { pattern: /\bonion\b|\bpyaz\b/, label: 'Onion' },
+  { pattern: /\bgarlic\b|\blehsun\b/, label: 'Garlic' },
+  { pattern: /\btomato\b/, label: 'Tomato' },
+  { pattern: /\bpotato\b|\baloo\b/, label: 'Potato' },
+  { pattern: /\bcarrot\b/, label: 'Carrot' },
+];
+
+// Maps to 'misc' (Fixed Cost catch-all) with metadata label
+const FIXED_COST_KEYWORDS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /pest\s*control/, label: 'Pest Control' },
+  { pattern: /fumigation/, label: 'Fumigation' },
+  { pattern: /\buniform\b|\bapron\b/, label: 'Uniform' },
+  { pattern: /\bfuel\b|\bpetrol\b|\bdiesel\b/, label: 'Vehicle Fuel' },
+  { pattern: /\bvehicle\b/, label: 'Vehicle' },
+  { pattern: /\binsurance\b/, label: 'Insurance' },
+  { pattern: /\blicen[sc]e\b/, label: 'License' },
+  { pattern: /subscription/, label: 'Subscription' },
+  { pattern: /\bcleaning\b/, label: 'Cleaning' },
+  { pattern: /\blaundry\b/, label: 'Laundry' },
+  { pattern: /\bsecurity\b/, label: 'Security' },
+  { pattern: /service\s*charge/, label: 'Service Charge' },
+  { pattern: /\bca\s*fee\b|\baccountant\b/, label: 'CA Fee' },
+  { pattern: /\bphone\s*bill\b|\bmobile\s*bill\b/, label: 'Phone Bill' },
+];
+
+// ── Category resolution result ───────────────────────────────────────
+interface CategoryResolution {
+  pnlColumn: string;            // e.g. 'gas', 'other', 'misc', 'sales'
+  label: string;                // display label e.g. 'Gas', 'Zepto', 'Pest Control'
+  breakdownLabel?: string;      // set only when pnlColumn is 'other' or 'misc'
+  needsClassification: boolean; // true → ask user before saving
+  rawCategory: string;          // original word from message for ask-once storage
+}
+
+// Resolve a category synchronously from keyword lists
+function resolveFromKeywords(lower: string): CategoryResolution | null {
+  // 1. Direct named column
+  for (const { pattern, column, label } of DIRECT_COLUMN_KEYWORDS) {
+    if (pattern.test(lower)) {
+      return { pnlColumn: column, label, needsClassification: false, rawCategory: column };
+    }
+  }
+  // 2. Item cost catch-all (other)
+  for (const { pattern, label } of ITEM_COST_KEYWORDS) {
+    if (pattern.test(lower)) {
+      return { pnlColumn: 'other', label, breakdownLabel: label, needsClassification: false, rawCategory: label.toLowerCase() };
+    }
+  }
+  // 3. Fixed cost catch-all (misc)
+  for (const { pattern, label } of FIXED_COST_KEYWORDS) {
+    if (pattern.test(lower)) {
+      return { pnlColumn: 'misc', label, breakdownLabel: label, needsClassification: false, rawCategory: label.toLowerCase() };
+    }
+  }
+  return null;
+}
+
+// Async: also checks expense_categories table for restaurant-specific mappings
+async function resolveExpenseCategory(
+  restaurantId: string,
+  lower: string,
+  rawWord: string  // the unclassified word from the message
+): Promise<CategoryResolution> {
+  // First try keyword classifier (no DB call)
+  const fromKeywords = resolveFromKeywords(lower);
+  if (fromKeywords) return fromKeywords;
+
+  // Check if this restaurant has previously classified this word
+  const saved = await dataService.getExpenseCategory(restaurantId, rawWord);
+  if (saved) {
+    const label = saved.displayLabel;
+    return {
+      pnlColumn: saved.pnlBucket,
+      label,
+      breakdownLabel: label,
+      needsClassification: false,
+      rawCategory: rawWord,
+    };
+  }
+
+  // Unknown — needs ask-once flow
+  return {
+    pnlColumn: 'other',     // tentative — won't be used until user answers
+    label: rawWord.charAt(0).toUpperCase() + rawWord.slice(1),
+    needsClassification: true,
+    rawCategory: rawWord,
+  };
+}
+
+// ── Extract category keyword from message for unknown expenses ───────
+function extractUnknownCategoryWord(lower: string): string {
+  return lower
+    .replace(/\b(expense|kharch|kharcha|cost|bill|aaj|today|for|is|was|on|the|a|an)\b/g, ' ')
+    .replace(/\d+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')[0] || 'expense';
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
 function extractSpecificMonth(lower: string): string | null {
   const m = lower.match(
     /\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s+(?:20)?(\d{2}))?\b/
@@ -26,8 +180,7 @@ function extractSpecificMonth(lower: string): string | null {
     /(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s*(?:20)?(\d{2})\b/
   );
   if (!m) return null;
-  const monKey = m[1].slice(0, 3);
-  const mon = MONTH_NAME_TO_NUM[monKey];
+  const mon = MONTH_NAME_TO_NUM[m[1].slice(0, 3)];
   if (!mon) return null;
   const yr = m[2] ? (m[2].length === 2 ? 2000 + parseInt(m[2]) : parseInt(m[2])) : new Date().getFullYear();
   return `${yr}-${String(mon).padStart(2, '0')}`;
@@ -35,9 +188,7 @@ function extractSpecificMonth(lower: string): string | null {
 
 function extractPeriodForSpecific(lower: string): { period: string; month?: string } | null {
   if (/last\s+\d+\s+months?/.test(lower)) return null;
-  if (/last\s+month|pichle?\s+mahine?|prev(?:ious)?\s+month/.test(lower)) {
-    return { period: 'last_month' };
-  }
+  if (/last\s+month|pichle?\s+mahine?|prev(?:ious)?\s+month/.test(lower)) return { period: 'last_month' };
   const month = extractSpecificMonth(lower);
   if (month) return { period: 'specific_month', month };
   if (/\baaj\b|\btoday\b/.test(lower)) return { period: 'today' };
@@ -65,52 +216,48 @@ function buildMonthsArray(nMonths: number): string[] {
   return months;
 }
 
-// Helper: detect category from message
+// Simple sync category detection for fast-path entries (ordinal date, today/aaj)
+// Returns pnl column name only — for full resolution (with metadata), use resolveExpenseCategory()
 function detectCategory(lower: string): string {
-  if (/\bmilk\b/.test(lower))                    return 'milk';
-  if (/\bbread\b/.test(lower))                    return 'bread';
-  if (/\bwater\b/.test(lower))                    return 'water';
-  if (/\bhyperpure\b/.test(lower))               return 'hyperpure';
-  if (/bigbasket|big\s*basket/.test(lower))       return 'bigbasket';
-  if (/\bdmart\b/.test(lower))                    return 'dmart';
-  if (/\bswiggy\b/.test(lower))                   return 'swiggy';
-  if (/\bzomato\b/.test(lower))                   return 'zomato';
-  if (/\bphonepe\b/.test(lower))                  return 'phonepe';
-  if (/\brent\b/.test(lower))                     return 'rent';
-  if (/\belectricity\b/.test(lower))              return 'electricity';
-  if (/\bgas\b/.test(lower))                      return 'gas';
-  if (/\bsalary\b/.test(lower))                   return 'salary';
-  if (/expense|kharch/.test(lower))               return 'other';
+  for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+    if (pattern.test(lower)) return column;
+  }
+  for (const { pattern } of ITEM_COST_KEYWORDS) {
+    if (pattern.test(lower)) return 'other';
+  }
+  for (const { pattern } of FIXED_COST_KEYWORDS) {
+    if (pattern.test(lower)) return 'misc';
+  }
+  if (/expense|kharch/.test(lower)) return 'other';
   return 'sales';
 }
 
+// ── Pre-parser fast path ─────────────────────────────────────────────
 function preParseIntent(body: string): ParsedIntent | null {
   const lower = body.toLowerCase().trim();
 
-  const ENTRY_KW = /\b(sales|revenue|bika|milk|bread|water|swiggy|zomato|phonepe|hyperpure|bigbasket|dmart|rent|electricity|gas|salary|pg|internet|garbage|repairs|marketing|misc|expense|kharch)\b/;
+  const ENTRY_KW = /\b(sales|revenue|bika|milk|bread|water|swiggy|zomato|phonepe|hyperpure|bigbasket|dmart|rent|electricity|gas|salary|pg|internet|garbage|repairs|marketing|misc|expense|kharch|cylinder|lpg|packaging|sabzi|zepto|blinkit|pest|uniform|fuel)\b/;
 
-  // Pre-compute explicit amount match ("is 552", "was 400", "= 300")
   const explicitAmountMatch = lower.match(/\b(?:is|was|=)\s+(?:rs\.?\s*|₹\s*)?(\d{2,6})\b/);
+  let amountInMsg: RegExpMatchArray | null;
+  if (explicitAmountMatch) {
+    amountInMsg = explicitAmountMatch;
+  } else {
+    const stripped = lower.replace(
+      /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
+      '$1'
+    );
+    amountInMsg = stripped.match(/\b(\d{2,6})\b/);
+  }
 
-  // Pre-compute general amount (for non-explicit cases)
-  const stripped = lower.replace(
-    /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
-    '$1'
-  );
-  const generalAmountMatch = stripped.match(/\b(\d{2,6})\b/);
-
-  // ── 0. ORDINAL DATE ENTRY → add_entries ─────────────────────────────
-  // Catches "Sales of 4th June 3245", "Milk of 4th June 2026 is 456"
+  // ── 0. ORDINAL DATE ENTRY ──────────────────────────────────────────
   const ordinalDateMatch = lower.match(/(\d{1,2})(?:st|nd|rd|th)\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?/i);
-  const amountInMsg = explicitAmountMatch || generalAmountMatch;
-
   if (ordinalDateMatch && amountInMsg && ENTRY_KW.test(lower)) {
     const day    = parseInt(ordinalDateMatch[1]);
     const monKey = ordinalDateMatch[2].toLowerCase().slice(0, 3);
     const mon    = MONTH_NAME_TO_NUM[monKey];
     const yearStr = ordinalDateMatch[3];
     const year   = yearStr ? parseInt(yearStr) : new Date().getFullYear();
-
     if (mon) {
       const entryDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const amount    = parseInt(amountInMsg[1]);
@@ -118,29 +265,23 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
-  // ── 0b. PLAIN DATE ENTRY (no ordinal suffix) → add_entries ──────────
-  // FIX: catches "Milk expense for 7 June is 552", "31 May sales 4200"
-  // Previously these were intercepted by the metricMap as queries
+  // ── 0b. PLAIN DATE ENTRY (no ordinal suffix) ───────────────────────
   const plainDateMatch = lower.match(/\b(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i);
   if (plainDateMatch && ENTRY_KW.test(lower)) {
     let plainAmount: number | null = null;
     if (explicitAmountMatch) {
-      // "is 552" / "was 400" — unambiguous amount
       plainAmount = parseInt(explicitAmountMatch[1]);
     } else {
-      // Strip the date part, then look for 3+ digit amount in the remainder
       const withoutDate = lower.replace(plainDateMatch[0], ' ').replace(/\s+/g, ' ').trim();
       const amtMatch = withoutDate.match(/\b(\d{3,6})\b/);
       if (amtMatch) plainAmount = parseInt(amtMatch[1]);
     }
-
     if (plainAmount !== null && plainAmount >= 10) {
       const day    = parseInt(plainDateMatch[1]);
       const monKey = plainDateMatch[2].toLowerCase().slice(0, 3);
       const mon    = MONTH_NAME_TO_NUM[monKey];
       const yearStr = plainDateMatch[3];
       const year   = yearStr ? parseInt(yearStr) : new Date().getFullYear();
-
       if (mon && day >= 1 && day <= 31) {
         const entryDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         return { intent: 'add_entries', entries: [{ category: detectCategory(lower), amount: plainAmount, date: entryDate }] };
@@ -148,11 +289,11 @@ function preParseIntent(body: string): ParsedIntent | null {
     }
   }
 
-  // ── 0c. TODAY/AAJ ENTRY → add_entries ───────────────────────────────
+  // ── 0c. TODAY/AAJ ENTRY ────────────────────────────────────────────
   const hasTodayKw = /\b(today|aaj)\b/.test(lower);
-  const todayEntryAmtMatch = lower.match(/\b(\d{3,6})\b/);
-  if (hasTodayKw && todayEntryAmtMatch && ENTRY_KW.test(lower)) {
-    const amount = parseInt(todayEntryAmtMatch[1]);
+  const todayAmtMatch = lower.match(/\b(\d{3,6})\b/);
+  if (hasTodayKw && todayAmtMatch && ENTRY_KW.test(lower)) {
+    const amount = parseInt(todayAmtMatch[1]);
     const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
     const entryDate = nowIST.toISOString().split('T')[0];
     return { intent: 'add_entries', entries: [{ category: detectCategory(lower), amount, date: entryDate }] };
@@ -162,34 +303,25 @@ function preParseIntent(body: string): ParsedIntent | null {
     /\baaj\b|\btoday\b/.test(lower)     ? undefined :
     /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
 
-  // ── 1. TREND / LAST N DAYS ──────────────────────────────────────────
+  // ── 1. TREND / LAST N DAYS ─────────────────────────────────────────
   const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
   if (/\btrend\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
     const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
     let metric = 'sales';
-    if (/\bmilk\b/.test(lower))                                               metric = 'milk';
-    else if (/\bbread\b/.test(lower))                                         metric = 'bread';
-    else if (/\bwater\b/.test(lower))                                         metric = 'water';
-    else if (/\bhyperpure\b/.test(lower))                                     metric = 'hyperpure';
-    else if (/bigbasket|big\s*basket/.test(lower))                            metric = 'bigbasket';
-    else if (/\bdmart\b/.test(lower))                                         metric = 'dmart';
-    else if (/\bswiggy\b/.test(lower))                                        metric = 'swiggy';
-    else if (/\bzomato\b/.test(lower))                                        metric = 'zomato';
-    else if (/\bphonepe\b/.test(lower))                                       metric = 'phonepe';
-    else if (/total\s+expenses?|cogs\s*\+\s*fixed|total\s+cost/.test(lower)) metric = 'total_expenses';
-    else if (/expense|cost|cogs|kharch/.test(lower))                          metric = 'cogs';
-
+    for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+      if (pattern.test(lower) && column !== 'sales') { metric = column; break; }
+    }
+    if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
     if (/this\s+month|is\s+mahine|mahine\s+ka/.test(lower) && !lastNMatch) {
       return { intent: 'query_daily_breakdown', metric, period: 'this_month' };
     }
     return { intent: 'query_daily_breakdown', metric, period: 'last_n_days', days };
   }
 
-  // ── 2. P&L / PnL ───────────────────────────────────────────────────
+  // ── 2. P&L ────────────────────────────────────────────────────────
   if (/p[&n]l\b|pnl|profit.*loss|loss.*profit|monthly\s+report|hisaab/.test(lower)) {
     const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
     const month = extractSpecificMonth(lower);
-
     if (isDetail) {
       if (/this\s+month|is\s+mahine|mtd/.test(lower))   return { intent: 'query_pnl_detail', period: 'mtd' };
       if (/\baaj\b|\btoday\b/.test(lower))              return { intent: 'query_pnl_detail', period: 'today' };
@@ -198,7 +330,6 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (month)                                         return { intent: 'query_pnl_detail', period: 'specific_month', month };
       return { intent: 'query_pnl_detail' };
     }
-
     if (/\baaj\b|\btoday\b/.test(lower))              return { intent: 'query_pnl', period: 'today' };
     if (/\bkal\b|\byesterday\b/.test(lower))          return { intent: 'query_pnl', period: 'yesterday' };
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_pnl', period: 'last_month' };
@@ -207,7 +338,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_pnl', period: 'mtd' };
   }
 
-  // ── 3. TOTAL SALES / REVENUE ─────────────────────────────────────────
+  // ── 3. TOTAL SALES / REVENUE ───────────────────────────────────────
   if (/total\s+sales|\brevenue\b|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'sales', period: 'last_month' };
@@ -216,7 +347,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_specific', metric: 'sales', period: spPeriod };
   }
 
-  // ── 4. TOTAL EXPENSES / COGS ──────────────────────────────────────────
+  // ── 4. TOTAL EXPENSES ─────────────────────────────────────────────
   if (/total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'cogs', period: 'last_month' };
@@ -225,9 +356,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_specific', metric: 'cogs', period: 'mtd' };
   }
 
-  // ── 5. UPLOAD HISTORY ─────────────────────────────────────────────────
-  // IMPORTANT: must be BEFORE metricMap — "bigbasket bill uploaded" matches
-  // bigbasket.*bill in metricMap, so upload queries must be caught first
+  // ── 5. UPLOAD HISTORY (before metricMap — bigbasket.*bill matches both) ──
   if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b|\bwhen.*\b(bill|upload)\b|\buploaded\b/.test(lower)) {
     const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
                    /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
@@ -235,7 +364,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_upload_history', vendor_filter: vendor, target: 'last' } as any;
   }
 
-  // ── 6. SPECIFIC METRIC QUESTIONS ─────────────────────────────────────
+  // ── 6. SPECIFIC METRIC QUESTIONS ──────────────────────────────────
   const metricMap: [RegExp, string][] = [
     [/how\s+much.*\bmilk\b|milk.*(?:expense|cost|bill|ka\s+kitna)|what\s+is.*milk/,   'milk'],
     [/how\s+much.*\bbread\b|bread.*(?:expense|cost)/,                                  'bread'],
@@ -249,6 +378,7 @@ function preParseIntent(body: string): ParsedIntent | null {
     [/how\s+much.*\bphonepe\b|phonepe.*(?:total|income|revenue)/,                      'phonepe'],
     [/how\s+much.*(?:salary|wages)|salary.*(?:this\s+month|is\s+mahine)/,              'salary'],
     [/how\s+much.*electricity|electricity.*(?:bill|total)/,                             'electricity'],
+    [/how\s+much.*\bgas\b|gas.*(?:bill|total)/,                                        'gas'],
   ];
   for (const [pattern, metric] of metricMap) {
     if (pattern.test(lower)) {
@@ -261,11 +391,13 @@ function preParseIntent(body: string): ParsedIntent | null {
   return null;
 }
 
+// ── Main handler ─────────────────────────────────────────────────────
 export async function handleTextMessage(from: string, restaurantId: string, body: string) {
   console.log(`[TextHandler] Processing: "${body}"`);
 
   try {
     const todayDate = new Date().toISOString().split('T')[0];
+    const lower = body.toLowerCase().trim();
 
     const preOverride = preParseIntent(body);
     let parsed: ParsedIntent;
@@ -276,8 +408,6 @@ export async function handleTextMessage(from: string, restaurantId: string, body
     } else {
       parsed = await parser.parseTextMessage(body, todayDate);
       console.log(`[TextHandler] Parsed:`, parsed);
-
-      const lower = body.toLowerCase();
 
       // Parser returned query_ingredient + last N months → multi-month ingredient
       if (parsed.intent === 'query_ingredient' && /last\s+(\d+)\s+months?/.test(lower)) {
@@ -291,30 +421,21 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       }
 
       else if (parsed.intent === 'query_freeform' || parsed.intent === 'unknown') {
-
         const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
 
-        // Safety 1: trend/daily
         if (/\btrend\b|\bdaily\b|\bdin\s+ka\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
           const days = lastNMatch ? parseInt(lastNMatch[1]) : 7;
           let metric = 'sales';
-          if (/\bmilk\b/.test(lower))                      metric = 'milk';
-          else if (/\bbread\b/.test(lower))                metric = 'bread';
-          else if (/\bwater\b/.test(lower))                metric = 'water';
-          else if (/\bhyperpure\b/.test(lower))            metric = 'hyperpure';
-          else if (/bigbasket|big\s+basket/.test(lower))   metric = 'bigbasket';
-          else if (/\bdmart\b/.test(lower))                metric = 'dmart';
-          else if (/\bswiggy\b/.test(lower))               metric = 'swiggy';
-          else if (/\bzomato\b/.test(lower))               metric = 'zomato';
-          else if (/\bphonepe\b/.test(lower))              metric = 'phonepe';
-          else if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
+          for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+            if (pattern.test(lower) && column !== 'sales') { metric = column; break; }
+          }
+          if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
           parsed.intent = 'query_daily_breakdown' as any;
           (parsed as any).metric = metric;
           (parsed as any).period = 'last_n_days';
           (parsed as any).days   = days;
         }
 
-        // Safety 2: P&L
         else if (/p[&n]l\b|pnl|profit.*loss|loss.*profit/.test(lower)) {
           const isDetail = /detail|detailed|full|complete|itemwise|poora|breakdown/.test(lower);
           parsed.intent = (isDetail ? 'query_pnl_detail' : 'query_pnl') as any;
@@ -323,37 +444,25 @@ export async function handleTextMessage(from: string, restaurantId: string, body
                                    /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
         }
 
-        // Safety 3: multi-month
         else if (/last\s+(\d+)\s+months?/.test(lower)) {
           const nMatch  = lower.match(/last\s+(\d+)\s+months?/);
           const nMonths = nMatch ? parseInt(nMatch[1]) : 3;
           const months  = buildMonthsArray(nMonths);
-
           let metric = 'sales';
-          if (/\bmilk\b/.test(lower))           metric = 'milk';
-          else if (/\bwater\b/.test(lower))     metric = 'water';
-          else if (/\bbread\b/.test(lower))     metric = 'bread';
-          else if (/\bhyperpure\b/.test(lower)) metric = 'hyperpure';
-          else if (/\bbigbasket\b/.test(lower)) metric = 'bigbasket';
-          else if (/\bdmart\b/.test(lower))     metric = 'dmart';
-          else if (/\bswiggy\b/.test(lower))    metric = 'swiggy';
-          else if (/\bzomato\b/.test(lower))    metric = 'zomato';
-          else if (/\bphonepe\b/.test(lower))   metric = 'phonepe';
-          else if (/\brent\b/.test(lower))      metric = 'rent';
-          else if (/\bsalary\b/.test(lower))    metric = 'salary';
-          else if (/expense|cost|kharch/.test(lower)) {
+          const kwRes = resolveFromKeywords(lower);
+          if (kwRes && kwRes.pnlColumn !== 'other' && kwRes.pnlColumn !== 'misc') {
+            metric = kwRes.pnlColumn;
+          } else if (/expense|cost|kharch/.test(lower)) {
             const ingredient = extractIngredientFromMessage(lower);
             metric = (ingredient && !PNL_COLUMNS.has(ingredient)) ? ingredient : 'cogs';
           }
-
           parsed.intent = 'query_specific' as any;
           (parsed as any).metric = metric;
           (parsed as any).period = 'multi_month';
           (parsed as any).months = months;
         }
 
-        // Safety 4: upload history
-        else if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\b(bill|upload|invoice)\b.*\b(last|recent|latest)\b|\bwhen.*\b(bill|upload)\b|\buploaded\b/.test(lower)) {
+        else if (/\b(last|recent|latest)\b.*\b(bill|upload|invoice)\b|\buploaded\b/.test(lower)) {
           const vendor = /hyperpure/.test(lower) ? 'hyperpure' :
                          /bigbasket|big\s*basket/.test(lower) ? 'bigbasket' :
                          /\bdmart\b/.test(lower) ? 'dmart' : null;
@@ -364,6 +473,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
       }
     }
 
+    // ── Route: add_entries ──────────────────────────────────────────
     if (parsed.intent === "add_entries" && parsed.entries && parsed.entries.length > 0) {
       let savedCount = 0;
 
@@ -377,21 +487,36 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           finalDate = entryDate.toISOString().split('T')[0];
         }
 
-        const category = (entry.category || '').toLowerCase().trim();
-        const pnlEntry: any = { date: finalDate };
+        const rawCategory = (entry.category || '').toLowerCase().trim();
 
-        if (category === 'sales' || category === 'revenue' || category.includes('bika')) {
-          pnlEntry.sales = entry.amount || 0;
-        } else if (category === 'hyperpure') {
-          pnlEntry.hyperpure = entry.amount || 0;
-        } else if (category === 'bigbasket' || category.includes('big basket') || category.includes('bbnow')) {
-          pnlEntry.bigbasket = entry.amount || 0;
-        } else {
-          pnlEntry[category] = entry.amount || 0;
+        // ── Full expense resolution (keyword → DB lookup → ask-once) ─
+        const resolution = await resolveExpenseCategory(restaurantId, rawCategory, rawCategory);
+        const pnlColumn = resolution.pnlColumn;
+
+        // Unknown category → ask user once before saving
+        if (resolution.needsClassification) {
+          await dataService.createPendingConfirmation(
+            restaurantId,
+            {
+              categoryName: resolution.rawCategory,
+              displayLabel: resolution.label,
+              amount:       entry.amount || 0,
+              date:         finalDate,
+            },
+            'classify_expense'
+          );
+
+          await sendMessage(from,
+            `Is '${resolution.label}' a fixed recurring expense (like rent, salary)\n` +
+            `or does it vary based on how much you sell?\n\n` +
+            `Reply *1* → Fixed Cost\n` +
+            `Reply *2* → Item Cost`
+          );
+          console.log(`[TextHandler] Asked user to classify: ${resolution.rawCategory}`);
+          break; // Only ask one at a time
         }
 
-        const pnlColumn = Object.keys(pnlEntry).find(k => k !== 'date') || category;
-
+        // Duplicate check
         const dupCheck = await dataService.checkDuplicateTextEntry(
           restaurantId, pnlColumn, finalDate, entry.amount || 0
         );
@@ -400,30 +525,43 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           const existing    = dupCheck.existingAmount || 0;
           const newAmount   = entry.amount || 0;
           const dateLabel   = formatDate(finalDate);
-          const displayName = pnlColumn.charAt(0).toUpperCase() + pnlColumn.slice(1);
+          const displayName = resolution.label;
 
           await dataService.createPendingConfirmation(
             restaurantId,
-            { category: pnlColumn, date: finalDate, amount: newAmount, existingAmount: existing, type: 'text' },
+            { category: pnlColumn, date: finalDate, amount: newAmount, existingAmount: existing, type: 'text', breakdownLabel: resolution.breakdownLabel },
             'confirm_text_entry'
           );
 
           let warnMsg: string;
           if (dupCheck.csvExists) {
-            warnMsg = `⚠️ CSV Already Uploaded for This Date\n\nYou uploaded a PhonePe CSV for ${dateLabel} which already has ₹${existing.toLocaleString('en-IN')} recorded.\n\nAdding ₹${newAmount.toLocaleString('en-IN')} manually will make the total ₹${(existing + newAmount).toLocaleString('en-IN')}.\n\nOnly save if this is an additional payment NOT in your CSV.\nReply *haan* to add anyway · *nahi* to cancel`;
+            warnMsg = `⚠️ CSV Already Uploaded for This Date\n\nYou uploaded a CSV for ${dateLabel} which already has ₹${existing.toLocaleString('en-IN')} recorded.\n\nAdding ₹${newAmount.toLocaleString('en-IN')} manually will make the total ₹${(existing + newAmount).toLocaleString('en-IN')}.\n\nReply *haan* to add anyway · *nahi* to cancel`;
           } else if (pnlColumn === 'swiggy' || pnlColumn === 'zomato') {
-            warnMsg = `⚠️ ${displayName} ₹${existing.toLocaleString('en-IN')} already saved for ${dateLabel}.\n\nIf this is a new settlement covering different orders, save anyway.\nReply *haan* to add ₹${newAmount.toLocaleString('en-IN')} more · *nahi* to cancel`;
+            warnMsg = `⚠️ ${displayName} ₹${existing.toLocaleString('en-IN')} already saved for ${dateLabel}.\n\nIf this is a new settlement, save anyway.\nReply *haan* to add ₹${newAmount.toLocaleString('en-IN')} more · *nahi* to cancel`;
           } else {
-            warnMsg = `⚠️ Possible Duplicate Entry\n\n${displayName} ₹${newAmount.toLocaleString('en-IN')} for ${dateLabel}\n\nYou already have ${displayName} ₹${existing.toLocaleString('en-IN')} saved for this date.\nSaving again will add ₹${newAmount.toLocaleString('en-IN')} more (total = ₹${(existing + newAmount).toLocaleString('en-IN')})\n\nReply *haan* to save anyway · *nahi* to cancel`;
+            warnMsg = `⚠️ Possible Duplicate Entry\n\n${displayName} ₹${newAmount.toLocaleString('en-IN')} for ${dateLabel}\n\nYou already have ${displayName} ₹${existing.toLocaleString('en-IN')} saved for this date.\nReply *haan* to save anyway · *nahi* to cancel`;
           }
-
           await sendMessage(from, warnMsg);
           break;
         }
 
-        await dataService.accumulatePnlEntry(restaurantId, pnlColumn, finalDate, entry.amount || 0, 'whatsapp');
-        const displayName = pnlColumn.charAt(0).toUpperCase() + pnlColumn.slice(1);
-        await sendMessage(from, `✅ ${displayName} ₹${(entry.amount || 0).toLocaleString('en-IN')} saved for ${formatDate(finalDate)}`);
+        // Save with metadata label
+        await dataService.accumulatePnlEntry(
+          restaurantId,
+          pnlColumn,
+          finalDate,
+          entry.amount || 0,
+          'whatsapp',
+          resolution.breakdownLabel
+        );
+
+        const costTypeLabel = resolution.breakdownLabel
+          ? (pnlColumn === 'other' ? ' (Item Cost)' : ' (Fixed Cost)')
+          : '';
+
+        await sendMessage(from,
+          `✅ ${resolution.label} ₹${(entry.amount || 0).toLocaleString('en-IN')} saved for ${formatDate(finalDate)}${costTypeLabel}`
+        );
         savedCount++;
       }
 
@@ -431,6 +569,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         await sendMessage(from, `✅ ${savedCount} entries saved successfully!`);
       }
     }
+
     else if (
       ['query_today','query_mtd','query_lastmonth',
        'query_specific','query_pnl','query_pnl_detail','query_items','query_ingredient',
@@ -465,13 +604,6 @@ function formatDate(isoDate: string): string {
 }
 
 async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to: `whatsapp:${to}`,
-    body: body,
-  });
+  const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  await twilio.messages.create({ from: 'whatsapp:+14155238886', to: `whatsapp:${to}`, body });
 }
