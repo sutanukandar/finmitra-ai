@@ -470,7 +470,7 @@ async function sendMessage(to: string, body: string) {
     process.env.TWILIO_AUTH_TOKEN
   );
   await twilio.messages.create({
-    from: 'whatsapp:+14155238886',
+    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
     to: `whatsapp:${to}`,
     body: body,
   });
