@@ -632,5 +632,9 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
 
 async function sendMessage(to: string, body: string) {
   const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  await twilio.messages.create({ from: 'whatsapp:+14155238886', to: `whatsapp:${to}`, body });
+  await twilio.messages.create({
+    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
+    to: `whatsapp:${to}`,
+    body,
+  });
 }
