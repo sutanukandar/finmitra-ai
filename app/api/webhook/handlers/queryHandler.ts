@@ -602,7 +602,7 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
     .forEach(({key,label})=>fixedLines.push(`${label.padEnd(12)}: ₹${Math.round(t.fixedTotals[key]).toLocaleString('en-IN')}`));
 
   const below = FIXED_COLUMNS.filter(({key})=>t.fixedTotals[key]>0&&t.fixedTotals[key]<FIXED_THRESHOLD);
-  const namedKeys = new Set(FIXED_COLUMNS.map(c=>c.key));
+  const namedKeys = new Set<string>(FIXED_COLUMNS.map(c=>c.key));
   const extraMisc = Object.entries(miscBreakdown).filter(([k])=>!namedKeys.has(k));
   const othersFixedTotal = below.reduce((s,{key})=>s+t.fixedTotals[key],0)
                          + extraMisc.reduce((s,[,v])=>s+v,0);
