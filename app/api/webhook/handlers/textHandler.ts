@@ -320,6 +320,31 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (pattern.test(lower) && column !== 'sales') { metric = column; break; }
     }
     if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
+
+    // Detect specific period before defaulting to last_n_days
+    const firstNDaysMatch = lower.match(/(?:first|pehle?)\s+(\d+)\s+days?/);
+    const lastNOfMatch    = lower.match(/last\s+(\d+)\s+days?\s+(?:of|in)/);
+    const specificMonth   = extractSpecificMonth(lower);
+
+    if (firstNDaysMatch) {
+      // "first 10 days of April 2026" / "first 7 days of March"
+      return { intent: 'query_daily_breakdown', metric,
+               period: 'first_n_days_of_month',
+               days: parseInt(firstNDaysMatch[1]),
+               ...(specificMonth ? { month: specificMonth } : {}) } as any;
+    }
+    if (lastNOfMatch && specificMonth) {
+      // "last 7 days of March 2026"
+      return { intent: 'query_daily_breakdown', metric,
+               period: 'last_n_days_of_month',
+               days: parseInt(lastNOfMatch[1]),
+               month: specificMonth } as any;
+    }
+    if (specificMonth && !lastNMatch) {
+      // "entire month of March 2026" / "daily sales for March 2026"
+      return { intent: 'query_daily_breakdown', metric,
+               period: 'specific_month', month: specificMonth } as any;
+    }
     if (/this\s+month|is\s+mahine|mahine\s+ka/.test(lower) && !lastNMatch) {
       return { intent: 'query_daily_breakdown', metric, period: 'this_month' };
     }
