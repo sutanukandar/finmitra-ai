@@ -574,7 +574,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
         );
 
         const costTypeLabel = resolution.breakdownLabel
-          ? (pnlColumn === 'other' ? ' (Item Cost)' : ' (Fixed Cost)')
+          ? (['other', 'local_market'].includes(pnlColumn) ? ' (Item Cost)' : ' (Fixed Cost)')
           : '';
 
         await sendMessage(from,
