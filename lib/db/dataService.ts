@@ -511,6 +511,116 @@ export const dataService = {
     console.log(`[dataService] Zeroed ${category} for ${date}`);
   },
 
+  // ── Soft delete for text entries ─────────────────────────────────────
+  // Saves the current column value to deleted_entries BEFORE zeroing,
+  // enabling recovery. Replaces bare zeroPnlColumn calls in confirmationHandler.
+  async softDeleteTextEntry(
+    restaurantId: string,
+    category: string,
+    date: string,
+    amount: number,
+    deletedBy: string = 'owner'
+  ): Promise<void> {
+    // 1. Record in deleted_entries for recovery
+    const { error: logErr } = await supabase
+      .from('deleted_entries')
+      .insert({
+        restaurant_id: restaurantId,
+        date,
+        category,
+        amount,
+        deleted_by:  deletedBy,
+        source:      'whatsapp',
+      });
+    if (logErr) console.error("[dataService] softDeleteTextEntry log failed:", logErr);
+
+    // 2. Zero the column (same as before, but now reversible)
+    const { error } = await supabase
+      .from('pnl_entries')
+      .update({ [category]: 0 })
+      .eq('restaurant_id', restaurantId)
+      .eq('date', date);
+    if (error) {
+      console.error("[dataService] softDeleteTextEntry zero failed:", error);
+      throw error;
+    }
+    console.log(`[dataService] Soft-deleted ${category} ₹${amount} for ${date} — recoverable`);
+  },
+
+  // ── Restore a soft-deleted text entry ────────────────────────────────
+  async restoreDeletedEntry(
+    deletedEntryId: string,
+    restoredBy: string = 'owner'
+  ): Promise<{ category: string; date: string; amount: number } | null> {
+    // Fetch the deleted entry
+    const { data: del } = await supabase
+      .from('deleted_entries')
+      .select('*')
+      .eq('id', deletedEntryId)
+      .is('restored_at', null)
+      .maybeSingle();
+
+    if (!del) return null;
+
+    // Re-accumulate the amount back into pnl_entries
+    await this.accumulatePnlEntry(
+      del.restaurant_id, del.category, del.date, Number(del.amount), 'whatsapp'
+    );
+
+    // Mark as restored
+    await supabase
+      .from('deleted_entries')
+      .update({ restored_at: new Date().toISOString(), restored_by: restoredBy })
+      .eq('id', deletedEntryId);
+
+    console.log(`[dataService] Restored ${del.category} ₹${del.amount} for ${del.date}`);
+    return { category: del.category, date: del.date, amount: Number(del.amount) };
+  },
+
+  // ── Soft delete a bill upload ────────────────────────────────────────
+  // Sets deleted_at on upload_records and reverses the pnl_entries amount.
+  async softDeleteBill(
+    restaurantId: string,
+    uploadRecordId: string,
+    deletedBy: string = 'owner'
+  ): Promise<void> {
+    // Fetch the upload record
+    const { data: record } = await supabase
+      .from('upload_records')
+      .select('date, amount, pnl_field')
+      .eq('id', uploadRecordId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (!record) throw new Error(`Upload record ${uploadRecordId} not found or already deleted`);
+
+    // Reverse the pnl_entries amount
+    const { data: existing } = await supabase
+      .from('pnl_entries')
+      .select(`${record.pnl_field}`)
+      .eq('restaurant_id', restaurantId)
+      .eq('date', record.date)
+      .maybeSingle();
+
+    const currentVal = Number((existing as any)?.[record.pnl_field] || 0);
+    const newVal     = Math.max(0, currentVal - Number(record.amount));
+
+    await supabase
+      .from('pnl_entries')
+      .upsert(
+        { restaurant_id: restaurantId, date: record.date, [record.pnl_field]: newVal },
+        { onConflict: 'restaurant_id,date' }
+      );
+
+    // Soft-delete the upload record
+    await supabase
+      .from('upload_records')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: deletedBy })
+      .eq('id', uploadRecordId);
+
+    console.log(`[dataService] Soft-deleted bill ${uploadRecordId}: reversed ₹${record.amount} from ${record.pnl_field} on ${record.date}`);
+  },
+
   async getPnlColumn(restaurantId: string, category: string, date: string): Promise<number> {
     const { data } = await supabase
       .from('pnl_entries')

@@ -63,12 +63,14 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       // ── confirm_delete ────────────────────────────────────────────────
       if (action === 'confirm_delete') {
         const { category, date, amount } = pending.payload || {};
-        await dataService.zeroPnlColumn(restaurantId, category, date);
+        // FIX: softDeleteTextEntry saves value to deleted_entries before zeroing
+        // — entry is now recoverable, not permanently lost
+        await dataService.softDeleteTextEntry(restaurantId, category, date, amount);
         await dataService.writeAuditLog(restaurantId, {
           action: 'delete', date_affected: date, pnl_field: category, amount_reversed: amount,
         });
         await sendMessage(from,
-          `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.`
+          `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.\n_Saved for recovery if needed._`
         );
 
       // ── confirm_text_entry ────────────────────────────────────────────
