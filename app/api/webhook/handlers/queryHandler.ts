@@ -26,13 +26,13 @@ const FIXED_COLUMNS = [
 
 const FIXED_THRESHOLD = 2000;
 
-const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, dmart, milk, bread, water, other, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
+const PNL_SELECT = 'date, sales, phonepe, swiggy, zomato, hyperpure, bigbasket, dmart, milk, bread, water, other, local_market, rent, electricity, salary, gas, fixed, pg, internet, garbage, repairs, marketing, misc';
 
 // Known pnl_entries columns — anything NOT in this set is an invoice_items ingredient
 const PNL_COLUMNS = new Set([
   'sales', 'revenue', 'cogs', 'phonepe', 'swiggy', 'zomato',
   'hyperpure', 'bigbasket', 'dmart', 'milk', 'bread', 'water', 'other',
-  'rent', 'salary', 'electricity', 'gas', 'pg', 'internet',
+  'local_market', 'rent', 'salary', 'electricity', 'gas', 'pg', 'internet',
   'garbage', 'repairs', 'marketing', 'misc', 'fixed',
   'cogs_pct_revenue', 'gross_margin_pct', 'net_margin_pct',
 ]);
@@ -53,7 +53,7 @@ function getMetricValue(e: any, metric: string): number {
   if (metric === 'sales' || metric === 'revenue')
     return (Number(e.sales)||0)+(Number(e.phonepe)||0)+(Number(e.swiggy)||0)+(Number(e.zomato)||0);
   if (metric === 'cogs')
-    return (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
+    return (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0)+(Number(e.local_market)||0);
   if (metric === 'fixed')
     return FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key])||0), 0);
   return Number(e[metric]) || 0;
@@ -187,7 +187,7 @@ export async function handlePnlQuery(
         const mo = (e.date as string).slice(0, 7);
         if (!byMonth[mo]) return;
         byMonth[mo].revenue += (Number(e.sales)||0)+(Number(e.phonepe)||0)+(Number(e.swiggy)||0)+(Number(e.zomato)||0);
-        byMonth[mo].cogs    += (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
+        byMonth[mo].cogs    += (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0)+(Number(e.local_market)||0);
         byMonth[mo].fixed   += FIXED_COLUMNS.reduce((s, { key }) => s + (Number(e[key])||0), 0);
         byMonth[mo].value   += getMetricValue(e, metric);
       });
@@ -258,7 +258,7 @@ export async function handlePnlQuery(
         milk += e.milk||0; bread += e.bread||0; water += e.water||0; other += e.other||0;
       });
       const revenue = sales + swiggy + zomato + phonepe;
-      const cogs    = hyperpure + bigbasket + dmart + milk + bread + water + other;
+      const cogs    = hyperpure + bigbasket + dmart + milk + bread + water + other + (entries as any[]).reduce((s,e)=>s+(Number(e.local_market)||0),0);
       const fixedTotal = (entries as any[]).reduce((s, e) => s + FIXED_COLUMNS.reduce((fs, { key }) => fs + (Number(e[key])||0), 0), 0);
 
       const metric = (parsed as any).metric ?? '';
@@ -443,9 +443,9 @@ export async function handlePnlQuery(
       const metric = (parsed as any).metric || 'revenue';
       const getValue = (e: any): number => {
         if (metric==='sales'||metric==='revenue') return (Number(e.sales)||0)+(Number(e.phonepe)||0)+(Number(e.swiggy)||0)+(Number(e.zomato)||0);
-        if (metric==='cogs'||metric==='item cost') return (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0);
+        if (metric==='cogs'||metric==='item cost') return (Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0)+(Number(e.local_market)||0);
         if (metric==='fixed') return FIXED_COLUMNS.reduce((s,{key})=>s+(Number(e[key])||0),0);
-        if (metric==='total_expenses') return ((Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0))+FIXED_COLUMNS.reduce((s,{key})=>s+(Number(e[key])||0),0);
+        if (metric==='total_expenses') return ((Number(e.hyperpure)||0)+(Number(e.bigbasket)||0)+(Number(e.dmart)||0)+(Number(e.milk)||0)+(Number(e.bread)||0)+(Number(e.water)||0)+(Number(e.other)||0)+(Number(e.local_market)||0))+FIXED_COLUMNS.reduce((s,{key})=>s+(Number(e[key])||0),0);
         return Number(e[metric])||0;
       };
 
@@ -550,11 +550,11 @@ export async function handlePnlQuery(
 }
 
 function computePnlTotals(entries: any[]) {
-  let sales=0, swiggy=0, zomato=0, phonepe=0, hyperpure=0, bigbasket=0, dmart=0, milk=0, bread=0, water=0, other=0;
-  entries.forEach((e: any) => { sales+=e.sales||0; swiggy+=e.swiggy||0; zomato+=e.zomato||0; phonepe+=e.phonepe||0; hyperpure+=e.hyperpure||0; bigbasket+=e.bigbasket||0; dmart+=e.dmart||0; milk+=e.milk||0; bread+=e.bread||0; water+=e.water||0; other+=e.other||0; });
+  let sales=0, swiggy=0, zomato=0, phonepe=0, hyperpure=0, bigbasket=0, dmart=0, milk=0, bread=0, water=0, other=0, local_market=0;
+  entries.forEach((e: any) => { sales+=e.sales||0; swiggy+=e.swiggy||0; zomato+=e.zomato||0; phonepe+=e.phonepe||0; hyperpure+=e.hyperpure||0; bigbasket+=e.bigbasket||0; dmart+=e.dmart||0; milk+=e.milk||0; bread+=e.bread||0; water+=e.water||0; other+=e.other||0; local_market+=Number(e.local_market)||0; });
   const fixedTotals: Record<string, number> = {};
   FIXED_COLUMNS.forEach(({key}) => { fixedTotals[key]=entries.reduce((s,e)=>s+(Number(e[key])||0),0); });
-  return { sales, swiggy, zomato, phonepe, hyperpure, bigbasket, dmart, milk, bread, water, other, fixedTotals, revenue: sales+swiggy+zomato+phonepe, cogs: hyperpure+bigbasket+dmart+milk+bread+water+other, fixedTotal: FIXED_COLUMNS.reduce((s,{key})=>s+fixedTotals[key],0) };
+  return { sales, swiggy, zomato, phonepe, hyperpure, bigbasket, dmart, milk, bread, water, other, local_market, fixedTotals, revenue: sales+swiggy+zomato+phonepe, cogs: hyperpure+bigbasket+dmart+milk+bread+water+other+local_market, fixedTotal: FIXED_COLUMNS.reduce((s,{key})=>s+fixedTotals[key],0) };
 }
 
 function buildPnlBreakdown(entries: any[], periodLabel: string): string {
@@ -564,6 +564,7 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
   // Aggregate metadata breakdowns across all days in the period
   const otherBreakdown: Record<string, number> = {};
   const miscBreakdown:  Record<string, number> = {};
+  const localMarketBreakdown: Record<string, number> = {};
   for (const e of entries) {
     const meta = (e.metadata || {}) as any;
     for (const [k, v] of Object.entries((meta.other_breakdown || {}) as Record<string, number>)) {
@@ -571,6 +572,9 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
     }
     for (const [k, v] of Object.entries((meta.misc_breakdown || {}) as Record<string, number>)) {
       miscBreakdown[k] = (miscBreakdown[k] || 0) + Number(v);
+    }
+    for (const [k, v] of Object.entries((meta.local_market_breakdown || {}) as Record<string, number>)) {
+      localMarketBreakdown[k] = (localMarketBreakdown[k] || 0) + Number(v);
     }
   }
 
@@ -587,6 +591,14 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
   if (t.milk)      cogsLines.push(`Milk        : ₹${Math.round(t.milk).toLocaleString('en-IN')}`);
   if (t.bread)     cogsLines.push(`Bread       : ₹${Math.round(t.bread).toLocaleString('en-IN')}`);
   if (t.water)     cogsLines.push(`Water       : ₹${Math.round(t.water).toLocaleString('en-IN')}`);
+  if (t.local_market) {
+    cogsLines.push(`Local Market: ₹${Math.round(t.local_market).toLocaleString('en-IN')}`);
+    // Indented breakdown of what was bought locally
+    for (const [label, amt] of Object.entries(localMarketBreakdown).sort((a,b) => b[1]-a[1])) {
+      const dl = label.charAt(0).toUpperCase() + label.slice(1);
+      cogsLines.push(`  • ${dl.padEnd(12)}: ₹${Math.round(amt).toLocaleString('en-IN')}`);
+    }
+  }
   if (t.other) {
     cogsLines.push(`Others      : ₹${Math.round(t.other).toLocaleString('en-IN')}`);
     // Indented breakdown (sorted by amount descending)

@@ -306,8 +306,10 @@ export const dataService = {
     meta[sourceKey] = sources;
 
     // Breakdown tracking (new: only for catch-all columns)
-    if (breakdownLabel && (category === 'other' || category === 'misc')) {
-      const bucketKey = category === 'other' ? 'other_breakdown' : 'misc_breakdown';
+    if (breakdownLabel && (category === 'other' || category === 'misc' || category === 'local_market')) {
+      const bucketKey = category === 'other'         ? 'other_breakdown'
+                      : category === 'misc'          ? 'misc_breakdown'
+                      :                               'local_market_breakdown';
       if (!meta[bucketKey]) meta[bucketKey] = {};
       const labelKey = breakdownLabel.toLowerCase();
       meta[bucketKey][labelKey] = (meta[bucketKey][labelKey] || 0) + amount;
@@ -381,7 +383,7 @@ export const dataService = {
   async reclassifyExpense(
     restaurantId: string,
     categoryName: string,           // e.g. "cylinder"
-    fromColumn: 'other' | 'misc',   // current wrong column
+    fromColumn: 'other' | 'misc' | 'local_market',  // current wrong column
     toColumn: string,               // correct column (e.g. 'gas', 'misc', 'other')
     toBreakdownLabel: string | null, // label for toColumn breakdown (if toColumn is other/misc)
     dateFilter?: { start: string; end: string }

@@ -17,7 +17,7 @@ const MONTH_NAME_TO_NUM: Record<string, number> = {
 const PNL_COLUMNS = new Set([
   'sales', 'revenue', 'cogs', 'phonepe', 'swiggy', 'zomato',
   'hyperpure', 'bigbasket', 'dmart', 'milk', 'bread', 'water', 'other',
-  'rent', 'salary', 'electricity', 'gas', 'pg', 'internet',
+  'local_market', 'rent', 'salary', 'electricity', 'gas', 'pg', 'internet',
   'garbage', 'repairs', 'marketing', 'misc', 'fixed',
 ]);
 
@@ -123,10 +123,10 @@ function resolveFromKeywords(lower: string): CategoryResolution | null {
       return { pnlColumn: column, label, needsClassification: false, rawCategory: column };
     }
   }
-  // 2. Item cost catch-all (other)
+  // 2. Item cost from local market (separate head, not 'other')
   for (const { pattern, label } of ITEM_COST_KEYWORDS) {
     if (pattern.test(lower)) {
-      return { pnlColumn: 'other', label, breakdownLabel: label, needsClassification: false, rawCategory: label.toLowerCase() };
+      return { pnlColumn: 'local_market', label, breakdownLabel: label, needsClassification: false, rawCategory: label.toLowerCase() };
     }
   }
   // 3. Fixed cost catch-all (misc)
@@ -231,7 +231,7 @@ function detectCategory(lower: string): string {
     if (pattern.test(lower)) return column;
   }
   for (const { pattern } of ITEM_COST_KEYWORDS) {
-    if (pattern.test(lower)) return 'other';
+    if (pattern.test(lower)) return 'local_market';
   }
   for (const { pattern } of FIXED_COST_KEYWORDS) {
     if (pattern.test(lower)) return 'misc';
@@ -506,8 +506,9 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
         const rawCategory = (entry.category || '').toLowerCase().trim();
 
-        // ── Full expense resolution (keyword → DB lookup → ask-once) ─
-        const resolution = await resolveExpenseCategory(restaurantId, rawCategory, rawCategory);
+        // FIX: pass full message body as `lower` so keyword classifier can detect
+        // ingredients like "eggs", "butter" even when parser returns category='other'
+        const resolution = await resolveExpenseCategory(restaurantId, lower, rawCategory);
         const pnlColumn = resolution.pnlColumn;
 
         // Unknown category → ask user once before saving
