@@ -78,6 +78,14 @@ const ITEM_COST_KEYWORDS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\btomato\b/, label: 'Tomato' },
   { pattern: /\bpotato\b|\baloo\b/, label: 'Potato' },
   { pattern: /\bcarrot\b/, label: 'Carrot' },
+  { pattern: /\bbutter\b/, label: 'Butter' },
+  { pattern: /\bcream\b/, label: 'Cream' },
+  { pattern: /\bcheese\b/, label: 'Cheese' },
+  { pattern: /\byoghurt\b|\bcurd\b|\bdahi\b/, label: 'Curd' },
+  { pattern: /\bnoodles\b|\bpasta\b/, label: 'Noodles' },
+  { pattern: /\bbread\s*crumb\b/, label: 'Breadcrumbs' },
+  { pattern: /\bmushroom\b/, label: 'Mushroom' },
+  { pattern: /\bspinach\b|\bpalak\b/, label: 'Spinach' },
 ];
 
 // Maps to 'misc' (Fixed Cost catch-all) with metadata label
@@ -348,9 +356,13 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 4. TOTAL EXPENSES ─────────────────────────────────────────────
-  // Skip if message mentions a specific ingredient (e.g. "how much expense on Butter")
-  // so the parser can handle it as query_ingredient instead
-  const hasSpecificIngredient = ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower));
+  // Skip if message is asking about a SPECIFIC ingredient/item —
+  // covers both known keywords AND the generic "expense on [X]" pattern.
+  // This lets the parser handle it as query_ingredient instead.
+  const hasSpecificIngredient =
+    ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower)) ||
+    /(?:expense|cost|spent)\s+on\s+(?!(?:total|all|everything)\b)[""']?\w/.test(lower);
+
   if (!hasSpecificIngredient && /total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'cogs', period: 'last_month' };
