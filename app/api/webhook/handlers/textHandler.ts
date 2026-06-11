@@ -348,7 +348,10 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 4. TOTAL EXPENSES ─────────────────────────────────────────────
-  if (/total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
+  // Skip if message mentions a specific ingredient (e.g. "how much expense on Butter")
+  // so the parser can handle it as query_ingredient instead
+  const hasSpecificIngredient = ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower));
+  if (!hasSpecificIngredient && /total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'cogs', period: 'last_month' };
     const month = extractSpecificMonth(lower);
