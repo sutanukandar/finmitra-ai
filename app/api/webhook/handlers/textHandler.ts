@@ -356,12 +356,14 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 4. TOTAL EXPENSES ─────────────────────────────────────────────
-  // Skip if message is asking about a SPECIFIC ingredient/item —
-  // covers both known keywords AND the generic "expense on [X]" pattern.
-  // This lets the parser handle it as query_ingredient instead.
+  // Skip if asking about a SPECIFIC ingredient — so parser handles as query_ingredient.
+  // Check 1: known keyword list (butter, zepto, etc.)
+  // Check 2: message contains "on [specific item]" — catches "expense on Butter",
+  //           "how much did i do on French fries", "spent on Carrot", etc.
+  //           Excludes time/general words like "this", "last", "total", "all".
+  const hasItemOnPattern = /\bon\s+(?!(?:this|last|that|the|a|an|total|all|everything|my|your|our)\s)\S/.test(lower);
   const hasSpecificIngredient =
-    ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower)) ||
-    /(?:expense|cost|spent)\s+on\s+(?!(?:total|all|everything)\b)[""']?\w/.test(lower);
+    ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower)) || hasItemOnPattern;
 
   if (!hasSpecificIngredient && /total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
