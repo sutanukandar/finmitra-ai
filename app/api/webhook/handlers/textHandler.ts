@@ -319,7 +319,9 @@ function preParseIntent(body: string): ParsedIntent | null {
     for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
       if (pattern.test(lower) && column !== 'sales') { metric = column; break; }
     }
-    if (/expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
+    // Only override to 'cogs' if NO specific column was matched
+    // Prevents "milk expense trend" → cogs (should stay milk)
+    if (metric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) metric = 'cogs';
 
     // Detect specific period before defaulting to last_n_days
     const firstNDaysMatch = lower.match(/(?:first|pehle?)\s+(\d+)\s+days?/);
