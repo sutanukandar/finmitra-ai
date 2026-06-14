@@ -281,7 +281,7 @@ function preParseIntent(body: string): ParsedIntent | null {
       plainAmount = parseInt(explicitAmountMatch[1]);
     } else {
       const withoutDate = lower.replace(plainDateMatch[0], ' ').replace(/\s+/g, ' ').trim();
-      const amtMatch = withoutDate.match(/\b(\d{3,6})\b/);
+      const amtMatch = withoutDate.match(/\b(\d{1,6})\b/);
       if (amtMatch) plainAmount = parseInt(amtMatch[1]);
     }
     if (plainAmount !== null && plainAmount >= 10) {
@@ -299,7 +299,7 @@ function preParseIntent(body: string): ParsedIntent | null {
 
   // ── 0c. TODAY/AAJ ENTRY ────────────────────────────────────────────
   const hasTodayKw = /\b(today|aaj)\b/.test(lower);
-  const todayAmtMatch = lower.match(/\b(\d{3,6})\b/);
+  const todayAmtMatch = lower.match(/\b(\d{2,6})\b/);
   if (hasTodayKw && todayAmtMatch && ENTRY_KW.test(lower)) {
     const amount = parseInt(todayAmtMatch[1]);
     const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
