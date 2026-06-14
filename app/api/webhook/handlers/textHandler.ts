@@ -373,8 +373,15 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'query_pnl', period: 'mtd' };
   }
 
+  // Guard: comparison queries and multi-month queries must bypass sections 3 & 4
+  // "comparison of item cost vs fixed cost for Mar, Apr, May, June" → parser handles it
+  const isComparisonQuery = /\bcompar(e|ison|ing)\b|\bversus\b|\bvs\.?\b/.test(lower);
+  const monthMatches = lower.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi) || [];
+  const hasMultipleMonths = monthMatches.length >= 2;
+
   // ── 3. TOTAL SALES / REVENUE ───────────────────────────────────────
-  if (/total\s+sales|\brevenue\b|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
+  if (!isComparisonQuery && !hasMultipleMonths &&
+      /total\s+sales|\brevenue\b|kitna\s+(?:bika|sales)|(?:sales|revenue)\s+kitna|how\s+much.*(?:sell|sold|sales)|what\s+is.*(?:total\s+)?(?:sales?|revenue)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'sales', period: 'last_month' };
     const month = extractSpecificMonth(lower);
@@ -392,7 +399,8 @@ function preParseIntent(body: string): ParsedIntent | null {
   const hasSpecificIngredient =
     ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower)) || hasItemOnPattern;
 
-  if (!hasSpecificIngredient && /total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
+  if (!isComparisonQuery && !hasMultipleMonths && !hasSpecificIngredient &&
+      /total\s+(?:expenses?|costs?|spending)|kitna\s+kharch|how\s+much.*(?:expense|cost|spent\s+on|spending)|what\s+(?:are|is).*(?:total\s+)?(?:expenses?|costs?)/.test(lower)) {
     if (/last\s+\d+\s+months?/.test(lower)) return null;
     if (/last\s+month|pichle?\s+mahine?/.test(lower)) return { intent: 'query_specific', metric: 'cogs', period: 'last_month' };
     const month = extractSpecificMonth(lower);
