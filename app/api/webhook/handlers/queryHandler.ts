@@ -331,6 +331,37 @@ export async function handlePnlQuery(
       let ingredient = (parsed as any).ingredient || '';
       if (!ingredient) { await sendMessage(from, "Which ingredient? e.g. \"how much Carrot did I buy this month\""); return; }
 
+      // Detect "when was X last bought?" / "last time I bought X" questions
+      // → skip monthly summary, return only the most recent purchase
+      const isLastTimeQuery = /last\s+time|when.*last|last.*bought|last.*purchas|kab\s+kharida|most\s+recent|when\s+was.*bought|when\s+did.*buy/i.test(body);
+
+      if (isLastTimeQuery) {
+        const { data: lp } = await supabase
+          .from('invoice_items')
+          .select('date, amount, quantity, unit, unit_normalised, vendor')
+          .eq('restaurant_id', restaurantId)
+          .ilike('item_canonical', `%${ingredient}%`)
+          .order('date', { ascending: false })
+          .limit(1);
+
+        if (!lp || lp.length === 0) {
+          await sendMessage(from, `No ${ingredient} purchases found in bill history.`);
+          return;
+        }
+        const r = lp[0] as any;
+        const dateLabel = new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', {
+          weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+        });
+        const unit = r.unit_normalised || r.unit || 'units';
+        await sendMessage(from,
+          `📦 *${ingredient} — Last Purchase*\n\n` +
+          `📅 ${dateLabel}\n` +
+          `💰 ₹${Number(r.amount).toLocaleString('en-IN')} — ${Number(r.quantity).toFixed(2)} ${unit}\n` +
+          `🏪 ${r.vendor}`
+        );
+        return;
+      }
+
       let startDate: string, endDate: string;
       if (parsed.period === 'specific_month' && parsed.month) {
         startDate = parsed.month+'-01'; endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth()+1, 0).toISOString().split('T')[0];
