@@ -447,7 +447,8 @@ function preParseIntent(body: string): ParsedIntent | null {
   // amount is 300, no date → save as today's unknown entry, ask-once
   // flow handles classification ("Is 'Food' a fixed or item cost?").
   const looksLikeQuestion = /^\s*(how|what|when|where|why|give|show|tell|which)\b|[?？]\s*$/.test(lower);
-  const clearAmount = extractAmount(lower);
+  const amtInMsg = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
+  const clearAmount = amtInMsg ? parseInt(amtInMsg[1]) : null;
   if (!looksLikeQuestion && ENTRY_KW.test(lower) && clearAmount && clearAmount >= 1) {
     return { intent: 'add_entries', entries: [{ category: 'other', amount: clearAmount, date: today }] } as any;
   }
