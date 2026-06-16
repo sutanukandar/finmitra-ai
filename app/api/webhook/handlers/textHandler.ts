@@ -315,7 +315,7 @@ function preParseIntent(body: string): ParsedIntent | null {
   // ── 0d. YESTERDAY/KAL ENTRY ────────────────────────────────────────
   // e.g. "Ginger expenses for yesterday is 138", "milk 552 kal"
   const hasYesterdayKw = /\byesterday\b|\bkal\b/.test(lower);
-  const yestAmtMatch = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
+  const yestAmtMatch = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{1,6})\b/);
   if (hasYesterdayKw && yestAmtMatch && ENTRY_KW.test(lower)) {
     const amount = parseInt(yestAmtMatch[1]);
     if (amount >= 1) {
