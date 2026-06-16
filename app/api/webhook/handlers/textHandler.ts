@@ -548,11 +548,26 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
         // Unknown category → ask user once before saving
         if (resolution.needsClassification) {
+          // Extract item name from message (e.g. "Expense for Tea Cup for 15 june 111" → "Tea Cup")
+          const extractedLabel = (() => {
+            const cleaned = lower
+              .replace(/\b(expense|kharch|for|is|on|of|the|a|an|this|month|week|today|aaj|kal)\b/g, ' ')
+              .replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/g, ' ')
+              .replace(/\b\d+(?:\.\d+)?\b/g, ' ')
+              .replace(/[₹$,]/g, ' ')
+              .replace(/\s+/g, ' ').trim();
+            if (!cleaned || cleaned.length < 2) return resolution.label || 'this expense';
+            return cleaned.split(' ')
+              .filter(w => w.length > 0)
+              .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(' ');
+          })();
+
           await dataService.createPendingConfirmation(
             restaurantId,
             {
               categoryName: resolution.rawCategory,
-              displayLabel: resolution.label,
+              displayLabel: extractedLabel,
               amount:       entry.amount || 0,
               date:         finalDate,
             },
@@ -560,12 +575,12 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           );
 
           await sendMessage(from,
-            `Is '${resolution.label}' a fixed recurring expense (like rent, salary)\n` +
+            `Is '${extractedLabel}' a fixed recurring expense (like rent, salary)\n` +
             `or does it vary based on how much you sell?\n\n` +
             `Reply *1* → Fixed Cost\n` +
             `Reply *2* → Item Cost`
           );
-          console.log(`[TextHandler] Asked user to classify: ${resolution.rawCategory}`);
+          console.log(`[TextHandler] Asked user to classify: ${extractedLabel}`);
           break; // Only ask one at a time
         }
 
