@@ -312,6 +312,20 @@ function preParseIntent(body: string): ParsedIntent | null {
     return { intent: 'add_entries', entries: [{ category: detectCategory(lower), amount, date: entryDate }] };
   }
 
+  // ── 0d. YESTERDAY/KAL ENTRY ────────────────────────────────────────
+  // e.g. "Ginger expenses for yesterday is 138", "milk 552 kal"
+  const hasYesterdayKw = /\byesterday\b|\bkal\b/.test(lower);
+  const yestAmtMatch = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
+  if (hasYesterdayKw && yestAmtMatch && ENTRY_KW.test(lower)) {
+    const amount = parseInt(yestAmtMatch[1]);
+    if (amount >= 1) {
+      const nowIST2 = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      nowIST2.setDate(nowIST2.getDate() - 1);
+      const yesterdayIST = nowIST2.toISOString().split('T')[0];
+      return { intent: 'add_entries', entries: [{ category: detectCategory(lower), amount, date: yesterdayIST }] };
+    }
+  }
+
   const spPeriod: string | undefined =
     /\baaj\b|\btoday\b/.test(lower)     ? undefined :
     /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
