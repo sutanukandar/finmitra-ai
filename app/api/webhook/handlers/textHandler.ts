@@ -78,8 +78,6 @@ const ITEM_COST_KEYWORDS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\btomato\b/, label: 'Tomato' },
   { pattern: /\bpotato\b|\baloo\b/, label: 'Potato' },
   { pattern: /\bcarrot\b/, label: 'Carrot' },
-  { pattern: /\bfood\b/, label: 'Food' },
-  { pattern: /\bchef\s+meal\b|\bstaff\s+meal\b|\bstaff\s+food\b/, label: 'Staff Meals' },
   { pattern: /\bbutter\b/, label: 'Butter' },
   { pattern: /\bcream\b/, label: 'Cream' },
   { pattern: /\bcheese\b/, label: 'Cheese' },
