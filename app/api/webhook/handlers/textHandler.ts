@@ -78,6 +78,8 @@ const ITEM_COST_KEYWORDS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\btomato\b/, label: 'Tomato' },
   { pattern: /\bpotato\b|\baloo\b/, label: 'Potato' },
   { pattern: /\bcarrot\b/, label: 'Carrot' },
+  { pattern: /\bfood\b/, label: 'Food' },
+  { pattern: /\bchef\s+meal\b|\bstaff\s+meal\b|\bstaff\s+food\b/, label: 'Staff Meals' },
   { pattern: /\bbutter\b/, label: 'Butter' },
   { pattern: /\bcream\b/, label: 'Cream' },
   { pattern: /\bcheese\b/, label: 'Cheese' },
@@ -438,6 +440,16 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (periodInfo === null) return null;
       return { intent: 'query_specific', metric, ...periodInfo };
     }
+  }
+
+  // ── 7. CATCH-ALL: ENTRY WITH UNRECOGNISED CATEGORY ────────────────
+  // e.g. "Food expense for both Chef is 300" — ENTRY_KW has "expense",
+  // amount is 300, no date → save as today's unknown entry, ask-once
+  // flow handles classification ("Is 'Food' a fixed or item cost?").
+  const looksLikeQuestion = /^\s*(how|what|when|where|why|give|show|tell|which)\b|[?？]\s*$/.test(lower);
+  const clearAmount = extractAmount(lower);
+  if (!looksLikeQuestion && ENTRY_KW.test(lower) && clearAmount && clearAmount >= 1) {
+    return { intent: 'add_entries', entries: [{ category: 'other', amount: clearAmount, date: today }] } as any;
   }
 
   return null;
