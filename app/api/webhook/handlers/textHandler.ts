@@ -450,7 +450,8 @@ function preParseIntent(body: string): ParsedIntent | null {
   const amtInMsg = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
   const clearAmount = amtInMsg ? parseInt(amtInMsg[1]) : null;
   if (!looksLikeQuestion && ENTRY_KW.test(lower) && clearAmount && clearAmount >= 1) {
-    return { intent: 'add_entries', entries: [{ category: 'other', amount: clearAmount, date: today }] } as any;
+    const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+    return { intent: 'add_entries', entries: [{ category: 'other', amount: clearAmount, date: todayIST }] } as any;
   }
 
   return null;
