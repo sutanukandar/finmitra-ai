@@ -671,11 +671,13 @@ export async function handlePnlQuery(
     await dataService.createPendingConfirmation(restaurantId, { startDate, endDate: endDate||startDate, periodLabel }, 'pnl_context');
 
     const profit = totals.revenue - totals.cogs - totals.fixedTotal;
+    const itemCostPct  = totals.revenue > 0 ? ((totals.cogs / totals.revenue) * 100).toFixed(1) : '0.0';
+    const fixedCostPct = totals.revenue > 0 ? ((totals.fixedTotal / totals.revenue) * 100).toFixed(1) : '0.0';
     await sendMessage(from,
       `📊 *P&L — ${periodLabel}*\n\n` +
       `Total Sales  : ₹${Math.round(totals.revenue).toLocaleString('en-IN')}\n` +
-      `Item Cost    : ₹${Math.round(totals.cogs).toLocaleString('en-IN')}\n` +
-      `Fixed Cost   : ₹${Math.round(totals.fixedTotal).toLocaleString('en-IN')}\n\n` +
+      `Item Cost    : ₹${Math.round(totals.cogs).toLocaleString('en-IN')} (${itemCostPct}%)\n` +
+      `Fixed Cost   : ₹${Math.round(totals.fixedTotal).toLocaleString('en-IN')} (${fixedCostPct}%)\n\n` +
       (profit >= 0 ? `💵 *Profit   : ₹${Math.round(profit).toLocaleString('en-IN')}*` : `🔴 *Loss     : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`)
     );
 
