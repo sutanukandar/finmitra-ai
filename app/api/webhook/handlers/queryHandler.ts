@@ -262,10 +262,20 @@ export async function handlePnlQuery(
       const fixedTotal = (entries as any[]).reduce((s, e) => s + FIXED_COLUMNS.reduce((fs, { key }) => fs + (Number(e[key])||0), 0), 0);
 
       const metric = (parsed as any).metric ?? '';
+      const isAverage = (parsed as any).average === true;
+      const numDays = entries.length;
       let reply: string;
 
-      if (metric === 'sales')            reply = `${period_label} Sales: ₹${revenue.toLocaleString('en-IN')}`;
-      else if (metric === 'cogs')        reply = `${period_label} Expenses: ₹${cogs.toLocaleString('en-IN')}`;
+      if (metric === 'sales') {
+        reply = isAverage
+          ? `${period_label} Average Daily Sales: ₹${(revenue / numDays).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (over ${numDays} days)`
+          : `${period_label} Sales: ₹${revenue.toLocaleString('en-IN')}`;
+      }
+      else if (metric === 'cogs') {
+        reply = isAverage
+          ? `${period_label} Average Daily Expenses: ₹${(cogs / numDays).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (over ${numDays} days)`
+          : `${period_label} Expenses: ₹${cogs.toLocaleString('en-IN')}`;
+      }
       else if (metric === 'cogs_pct_revenue') {
         const pct = revenue > 0 ? ((cogs / revenue) * 100).toFixed(1) : '0';
         reply = `${period_label} COGS is ${pct}% of Revenue`;
@@ -279,13 +289,16 @@ export async function handlePnlQuery(
         const total = (entries as any[]).reduce((s, e) => s + (Number(e[metric])||0), 0);
         const metricLabels: Record<string, string> = {
           hyperpure: 'Hyperpure', bigbasket: 'BigBasket', dmart: 'DMart', milk: 'Milk',
-          bread: 'Bread', water: 'Water', other: 'Other', rent: 'Rent', salary: 'Salary',
+          bread: 'Bread', water: 'Water', other: 'Other', local_market: 'Local Market',
+          rent: 'Rent', salary: 'Salary',
           electricity: 'Electricity', gas: 'Gas', pg: 'Staff PG', internet: 'Internet',
           garbage: 'Garbage', repairs: 'Repairs', marketing: 'Marketing', misc: 'Misc',
           swiggy: 'Swiggy', zomato: 'Zomato', phonepe: 'PhonePe',
         };
         const label = metricLabels[metric] || metric.charAt(0).toUpperCase() + metric.slice(1);
-        reply = `${period_label} ${label}: ₹${total.toLocaleString('en-IN')}`;
+        reply = isAverage
+          ? `${period_label} Average Daily ${label}: ₹${(total / numDays).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (over ${numDays} days)`
+          : `${period_label} ${label}: ₹${total.toLocaleString('en-IN')}`;
       }
       await sendMessage(from, reply);
       return;

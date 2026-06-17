@@ -332,6 +332,32 @@ function preParseIntent(body: string): ParsedIntent | null {
     /\baaj\b|\btoday\b/.test(lower)     ? undefined :
     /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
 
+  // ── 0e. AVERAGE QUERY ────────────────────────────────────────────
+  // e.g. "average daily sales for this month", "ausat sales", "avg milk cost"
+  // Must come BEFORE section 1 (trend), since "average daily sales" contains
+  // "daily" which would otherwise be caught by the trend/day-wise pattern.
+  if (/\baverage\b|\bavg\b|\bauasat\b|\baushat\b/.test(lower)) {
+    let avgMetric = 'sales';
+    for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+      if (pattern.test(lower) && column !== 'sales') { avgMetric = column; break; }
+    }
+    if (avgMetric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) avgMetric = 'cogs';
+
+    const specificMonth = extractSpecificMonth(lower);
+    if (specificMonth) {
+      return { intent: 'query_specific', metric: avgMetric, period: 'specific_month', month: specificMonth, average: true } as any;
+    }
+    if (/last\s+month|pichle?\s+mahine?/.test(lower)) {
+      return { intent: 'query_specific', metric: avgMetric, period: 'last_month', average: true } as any;
+    }
+    const lastNMatchAvg = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
+    if (lastNMatchAvg) {
+      return { intent: 'query_specific', metric: avgMetric, period: 'last_n_days', days: parseInt(lastNMatchAvg[1]), average: true } as any;
+    }
+    // Default: this month / mtd
+    return { intent: 'query_specific', metric: avgMetric, period: 'mtd', average: true } as any;
+  }
+
   // ── 1. TREND / LAST N DAYS ─────────────────────────────────────────
   const lastNMatch = lower.match(/(?:last|past)\s+(\d+)\s+days?/);
   if (/\btrend\b|day[\s-]?wise|day\s+by\s+day/.test(lower) || lastNMatch) {
