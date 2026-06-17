@@ -358,17 +358,34 @@ export async function handlePnlQuery(
       let ingredient = (parsed as any).ingredient || '';
       if (!ingredient) { await sendMessage(from, "Which ingredient? e.g. \"how much Carrot did I buy this month\""); return; }
 
+      // FIX: normalize singular/plural mismatches before ILIKE matching.
+      // "french fry" (singular, user input) must match "French Fries" (plural, DB)
+      // and vice versa. Strip common plural endings to get a base form, then
+      // search on that base — substring match catches both directions.
+      const singularize = (s: string): string => {
+        const w = s.trim().toLowerCase();
+        if (w.endsWith('ies')) return w.slice(0, -3) + 'y';   // fries -> fry, candies -> candy
+        if (w.endsWith('oes')) return w.slice(0, -2);          // potatoes -> potato
+        if (w.endsWith('ses')) return w.slice(0, -2);          // glasses -> glass
+        if (w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1); // onions -> onion
+        return w;
+      };
+      const ingredientBase = singularize(ingredient);
+      // Use the shorter of the two forms as the ILIKE pattern so it matches
+      // both "fry"→"fries" and "fries"→"fry" style mismatches in either direction.
+      const ingredientSearch = ingredientBase.length <= ingredient.length ? ingredientBase : ingredient;
+
       // Detect "when was X last bought?" / "last time I bought X" questions
       // → skip monthly summary, return only the most recent purchase
       const isLastTimeQuery = /last\s+time|when.*last|last.*bought|last.*purchas|kab\s+kharida|most\s+recent|when\s+was.*bought|when\s+did.*buy/i.test(body);
 
       if (isLastTimeQuery) {
-        // Check invoice_items (bill uploads)
+        // Check invoice_items (bill uploads) — use singularized base for robust matching
         const { data: lp } = await supabase
           .from('invoice_items')
           .select('date, amount, quantity, unit, unit_normalised, vendor')
           .eq('restaurant_id', restaurantId)
-          .ilike('item_canonical', `%${ingredient}%`)
+          .ilike('item_canonical', `%${ingredientSearch}%`)
           .order('date', { ascending: false })
           .limit(1);
 
@@ -387,10 +404,12 @@ export async function handlePnlQuery(
         if (pnlRows) {
           for (const row of pnlRows as any[]) {
             const breakdown = row.metadata?.local_market_breakdown || {};
-            const matchKey = Object.keys(breakdown).find(k =>
-              k.toLowerCase().includes(ingredient.toLowerCase()) ||
-              ingredient.toLowerCase().includes(k.toLowerCase())
-            );
+            const matchKey = Object.keys(breakdown).find(k => {
+              const kBase = singularize(k);
+              return k.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
+                     ingredientSearch.toLowerCase().includes(k.toLowerCase()) ||
+                     kBase === ingredientBase;
+            });
             if (matchKey) {
               textEntryDate   = row.date;
               textEntryAmount = Number(breakdown[matchKey]);
