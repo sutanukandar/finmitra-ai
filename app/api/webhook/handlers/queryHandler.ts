@@ -358,29 +358,41 @@ export async function handlePnlQuery(
       let ingredient = (parsed as any).ingredient || '';
       if (!ingredient) { await sendMessage(from, "Which ingredient? e.g. \"how much Carrot did I buy this month\""); return; }
 
-      // FIX: normalize singular/plural mismatches before ILIKE matching.
-      // "french fry" (singular, user input) must match "French Fries" (plural, DB)
-      // and vice versa. Strip common plural endings to get a base form, then
-      // search on that base — substring match catches both directions.
-      const singularize = (s: string): string => {
+      // FIX: build a search STEM that is a substring of both singular and
+      // plural forms, rather than trying to convert one into the other.
+      // "fry" vs "fries" share no full-word substring in either direction
+      // (f-r-y vs f-r-i-e-s), so singularize()-only approaches fail.
+      // Instead: strip the last word down to a safe common stem by removing
+      // trailing letters that commonly vary between singular/plural
+      // (y, ies, oes, es, s) — the resulting stem matches both forms.
+      const stemWord = (s: string): string => {
         const w = s.trim().toLowerCase();
-        if (w.endsWith('ies')) return w.slice(0, -3) + 'y';   // fries -> fry, candies -> candy
-        if (w.endsWith('oes')) return w.slice(0, -2);          // potatoes -> potato
-        if (w.endsWith('ses')) return w.slice(0, -2);          // glasses -> glass
+        if (w.endsWith('ies'))  return w.slice(0, -3);   // fries -> fr (matches fry AND fries)
+        if (w.endsWith('oes'))  return w.slice(0, -2);   // potatoes -> potato
+        if (w.endsWith('ves'))  return w.slice(0, -3);   // leaves -> lea
+        if (w.endsWith('ses'))  return w.slice(0, -2);   // glasses -> glass
+        if (w.endsWith('y'))    return w.slice(0, -1);   // fry -> fr (matches fries too)
+        if (w.endsWith('es'))   return w.slice(0, -2);   // tomatoes-ish, boxes -> box
         if (w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1); // onions -> onion
         return w;
       };
-      const ingredientBase = singularize(ingredient);
-      // Use the shorter of the two forms as the ILIKE pattern so it matches
-      // both "fry"→"fries" and "fries"→"fry" style mismatches in either direction.
-      const ingredientSearch = ingredientBase.length <= ingredient.length ? ingredientBase : ingredient;
+      // Stem only the LAST word of a multi-word ingredient (e.g. "french fry" -> "french fr")
+      // so the rest of the phrase still narrows the match correctly.
+      const stemPhrase = (s: string): string => {
+        const words = s.trim().split(/\s+/);
+        if (words.length === 0) return s;
+        const last = stemWord(words[words.length - 1]);
+        return [...words.slice(0, -1), last].join(' ');
+      };
+      const ingredientBase = stemWord(ingredient.split(/\s+/).pop() || ingredient); // last word, stemmed
+      const ingredientSearch = stemPhrase(ingredient); // full phrase with last word stemmed
 
       // Detect "when was X last bought?" / "last time I bought X" questions
       // → skip monthly summary, return only the most recent purchase
       const isLastTimeQuery = /last\s+time|when.*last|last.*bought|last.*purchas|kab\s+kharida|most\s+recent|when\s+was.*bought|when\s+did.*buy/i.test(body);
 
       if (isLastTimeQuery) {
-        // Check invoice_items (bill uploads) — use singularized base for robust matching
+        // Check invoice_items (bill uploads) — use stemmed phrase for robust matching
         const { data: lp } = await supabase
           .from('invoice_items')
           .select('date, amount, quantity, unit, unit_normalised, vendor')
@@ -405,10 +417,11 @@ export async function handlePnlQuery(
           for (const row of pnlRows as any[]) {
             const breakdown = row.metadata?.local_market_breakdown || {};
             const matchKey = Object.keys(breakdown).find(k => {
-              const kBase = singularize(k);
+              const kStemmed = stemPhrase(k);
               return k.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
                      ingredientSearch.toLowerCase().includes(k.toLowerCase()) ||
-                     kBase === ingredientBase;
+                     kStemmed === ingredientSearch ||
+                     stemWord(k.split(/\s+/).pop() || k) === ingredientBase;
             });
             if (matchKey) {
               textEntryDate   = row.date;
