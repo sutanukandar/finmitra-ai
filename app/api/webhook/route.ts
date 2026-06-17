@@ -6,6 +6,7 @@ import { handleTextMessage } from './handlers/textHandler';
 import { handleMediaUpload } from './handlers/mediaHandler';
 import { handleConfirmation } from './handlers/confirmationHandler';
 import { handleDelete } from './handlers/deleteHandler';
+import { handleOnboarding } from './handlers/onboardingHandler';
 import { isInContext } from './guards/contextGuard';
 import { isRateLimited } from './guards/rateLimiter';
 
@@ -34,11 +35,12 @@ export async function POST(req: NextRequest) {
       .eq('whatsapp_number', from)
       .single();
 
+    // FIX: unregistered number → self-onboarding flow instead of rejection message
     if (!restaurant || restaurantError) {
-      await sendMessage(from,
-        `Hi! This number is not registered with FinMitra.\n\n` +
-        `Please contact your FinMitra representative to get set up.`
-      );
+      // Skip onboarding for media-only messages with no text — ask for a name first
+      const rawBody = (formData.get('Body') as string || '').trim();
+      await handleOnboarding(from, rawBody);
+      console.log(`[Webhook] Onboarding step handled in ${Date.now() - startTime}ms`);
       return NextResponse.json({ success: true });
     }
 
