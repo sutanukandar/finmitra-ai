@@ -260,7 +260,7 @@ function preParseIntent(body: string): ParsedIntent | null {
       /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(20[23]\d)\b/g,
       '$1'
     );
-    amountInMsg = stripped.match(/\b(\d{1,6})\b/);
+    amountInMsg = stripped.match(/\b(\d{2,6})\b/);
   }
 
   // ── 0. ORDINAL DATE ENTRY ──────────────────────────────────────────
@@ -304,7 +304,7 @@ function preParseIntent(body: string): ParsedIntent | null {
 
   // ── 0c. TODAY/AAJ ENTRY ────────────────────────────────────────────
   const hasTodayKw = /\b(today|aaj)\b/.test(lower);
-  const todayAmtMatch = lower.match(/\b(\d{1,6})\b/);
+  const todayAmtMatch = lower.match(/\b(\d{2,6})\b/);
   if (hasTodayKw && todayAmtMatch && ENTRY_KW.test(lower)) {
     const amount = parseInt(todayAmtMatch[1]);
     const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
@@ -319,8 +319,10 @@ function preParseIntent(body: string): ParsedIntent | null {
   if (hasYesterdayKw && yestAmtMatch && ENTRY_KW.test(lower)) {
     const amount = parseInt(yestAmtMatch[1]);
     if (amount >= 1) {
+      // FIX: use getUTCDate/setUTCDate so Vercel's non-UTC server timezone
+      // doesn't shift the day (e.g. US-East would make "today" = yesterday UTC)
       const nowIST2 = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-      nowIST2.setDate(nowIST2.getDate() - 1);
+      nowIST2.setUTCDate(nowIST2.getUTCDate() - 1);
       const yesterdayIST = nowIST2.toISOString().split('T')[0];
       return { intent: 'add_entries', entries: [{ category: detectCategory(lower), amount, date: yesterdayIST }] };
     }
@@ -464,7 +466,7 @@ function preParseIntent(body: string): ParsedIntent | null {
   // amount is 300, no date → save as today's unknown entry, ask-once
   // flow handles classification ("Is 'Food' a fixed or item cost?").
   const looksLikeQuestion = /^\s*(how|what|when|where|why|give|show|tell|which)\b|[?？]\s*$/.test(lower);
-  const amtInMsg = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{1,6})\b/);
+  const amtInMsg = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
   const clearAmount = amtInMsg ? parseInt(amtInMsg[1]) : null;
   if (!looksLikeQuestion && ENTRY_KW.test(lower) && clearAmount && clearAmount >= 1) {
     const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];

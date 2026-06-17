@@ -336,6 +336,7 @@ export async function handlePnlQuery(
       const isLastTimeQuery = /last\s+time|when.*last|last.*bought|last.*purchas|kab\s+kharida|most\s+recent|when\s+was.*bought|when\s+did.*buy/i.test(body);
 
       if (isLastTimeQuery) {
+        // Check invoice_items (bill uploads)
         const { data: lp } = await supabase
           .from('invoice_items')
           .select('date, amount, quantity, unit, unit_normalised, vendor')
@@ -344,11 +345,56 @@ export async function handlePnlQuery(
           .order('date', { ascending: false })
           .limit(1);
 
-        if (!lp || lp.length === 0) {
+        // Also check pnl_entries local_market_breakdown (WhatsApp text entries)
+        const { data: pnlRows } = await supabase
+          .from('pnl_entries')
+          .select('date, local_market, metadata')
+          .eq('restaurant_id', restaurantId)
+          .not('metadata', 'is', null)
+          .order('date', { ascending: false })
+          .limit(60);
+
+        // Find most recent local_market entry matching the ingredient
+        let textEntryDate: string | null = null;
+        let textEntryAmount: number | null = null;
+        if (pnlRows) {
+          for (const row of pnlRows as any[]) {
+            const breakdown = row.metadata?.local_market_breakdown || {};
+            const matchKey = Object.keys(breakdown).find(k =>
+              k.toLowerCase().includes(ingredient.toLowerCase()) ||
+              ingredient.toLowerCase().includes(k.toLowerCase())
+            );
+            if (matchKey) {
+              textEntryDate   = row.date;
+              textEntryAmount = Number(breakdown[matchKey]);
+              break; // already ordered desc, first match = most recent
+            }
+          }
+        }
+
+        // Pick the more recent of bill vs text entry
+        const billDate = lp && lp.length > 0 ? (lp[0] as any).date : null;
+        const useTextEntry = textEntryDate && (!billDate || textEntryDate >= billDate);
+
+        if (useTextEntry && textEntryDate) {
+          const dateLabel = new Date(textEntryDate + 'T00:00:00').toLocaleDateString('en-IN', {
+            weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
+          });
+          await sendMessage(from,
+            `📦 *${ingredient} — Last Purchase*\n\n` +
+            `📅 ${dateLabel}\n` +
+            `💰 ₹${(textEntryAmount || 0).toLocaleString('en-IN')}\n` +
+            `🏪 Local Market (direct entry)`
+          );
+          return;
+        }
+
+        if (!billDate) {
           await sendMessage(from, `No ${ingredient} purchases found in bill history.`);
           return;
         }
-        const r = lp[0] as any;
+
+        const r = lp![0] as any;
         const dateLabel = new Date(r.date + 'T00:00:00').toLocaleDateString('en-IN', {
           weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
         });
