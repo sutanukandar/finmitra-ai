@@ -230,6 +230,13 @@ export async function handlePnlQuery(
       if (parsed.period === 'specific_date' && parsed.date) {
         startDate = parsed.date; endDate = parsed.date;
         period_label = new Date(parsed.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+      } else if (parsed.period === 'explicit_range' && (parsed as any).startDate && (parsed as any).endDate) {
+        // FIX: explicit date range, e.g. "first 16 days of June" or "1 June to 16 June"
+        startDate = (parsed as any).startDate;
+        endDate   = (parsed as any).endDate;
+        const sLabel = new Date(startDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+        const eLabel = new Date(endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+        period_label = `${sLabel} – ${eLabel}`;
       } else if (parsed.period === 'specific_month' && parsed.month) {
         const [y, m] = parsed.month.split('-').map(Number);
         startDate = `${parsed.month}-01`; endDate = new Date(y, m, 0).toISOString().split('T')[0];
@@ -240,6 +247,13 @@ export async function handlePnlQuery(
       } else if (parsed.period === 'last_month') {
         const lmr = getLastMonthRange();
         startDate = lmr.startDate; endDate = lmr.endDate; period_label = lmr.periodLabel;
+      } else if (parsed.period === 'last_n_days' && (parsed as any).days) {
+        const n = (parsed as any).days;
+        const nowIST4 = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        endDate = nowIST4.toISOString().split('T')[0];
+        const startD4 = new Date(nowIST4); startD4.setUTCDate(startD4.getUTCDate() - (n - 1));
+        startDate = startD4.toISOString().split('T')[0];
+        period_label = `Last ${n} Days`;
       } else if (parsed.period === 'yesterday') {
         const yest = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - 86400000);
         startDate = yest.toISOString().split('T')[0]; endDate = startDate; period_label = 'Yesterday';

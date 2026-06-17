@@ -279,8 +279,14 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 0b. PLAIN DATE ENTRY (no ordinal suffix) ───────────────────────
+  // Guard: skip if this looks like a trend/average/range QUERY rather
+  // than a data entry. A second date or "trend/average/to/range" word
+  // means the user is asking about a period, not saving one value.
   const plainDateMatch = lower.match(/\b(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i);
-  if (plainDateMatch && ENTRY_KW.test(lower)) {
+  const allDateMatches = lower.match(/\b\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\w*/gi) || [];
+  const isRangeOrTrendQuery = /\btrend\b|\baverage\b|\bavg\b|\bto\s+\d|\bfrom\s+\d|\brange\b/.test(lower) || allDateMatches.length >= 2;
+
+  if (plainDateMatch && ENTRY_KW.test(lower) && !isRangeOrTrendQuery) {
     let plainAmount: number | null = null;
     if (explicitAmountMatch) {
       plainAmount = parseInt(explicitAmountMatch[1]);
@@ -342,6 +348,35 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (pattern.test(lower) && column !== 'sales') { avgMetric = column; break; }
     }
     if (avgMetric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) avgMetric = 'cogs';
+
+    // Detect "first N days of [month]" — e.g. "first 16 days of the month"
+    const firstNDaysMatch = lower.match(/(?:first|pehle?)\s+(\d+)\s+days?/);
+    if (firstNDaysMatch) {
+      const n = parseInt(firstNDaysMatch[1]);
+      const specMonth = extractSpecificMonth(lower);
+      const nowIST3 = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      const baseMonth = specMonth || nowIST3.toISOString().slice(0, 7); // YYYY-MM
+      const [by, bm] = baseMonth.split('-').map(Number);
+      const startD = `${baseMonth}-01`;
+      const endD = new Date(by, bm - 1, n).toISOString().split('T')[0];
+      return { intent: 'query_specific', metric: avgMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: true } as any;
+    }
+
+    // Detect explicit date range — "from 1st June to 16 June", "1 June to 16 June 2026"
+    const rangeMatch = lower.match(/(?:from\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)(?:\s+(20\d{2}))?\s+(?:to|till|-)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)?(?:\s+(20\d{2}))?/i);
+    if (rangeMatch) {
+      const d1 = parseInt(rangeMatch[1]);
+      const m1 = MONTH_NAME_TO_NUM[rangeMatch[2].toLowerCase().slice(0, 3)];
+      const y1 = rangeMatch[3] ? parseInt(rangeMatch[3]) : new Date().getFullYear();
+      const d2 = parseInt(rangeMatch[4]);
+      const m2 = rangeMatch[5] ? MONTH_NAME_TO_NUM[rangeMatch[5].toLowerCase().slice(0, 3)] : m1; // reuse month1 if omitted
+      const y2 = rangeMatch[6] ? parseInt(rangeMatch[6]) : y1;
+      if (m1 && m2) {
+        const startD = `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
+        const endD   = `${y2}-${String(m2).padStart(2, '0')}-${String(d2).padStart(2, '0')}`;
+        return { intent: 'query_specific', metric: avgMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: true } as any;
+      }
+    }
 
     const specificMonth = extractSpecificMonth(lower);
     if (specificMonth) {
