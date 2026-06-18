@@ -209,12 +209,18 @@ export const dataService = {
     date: string,
     amount: number
   ): Promise<{ isDuplicate: boolean; existingAmount?: number; existingCreatedAt?: string }> {
+    // FIX (Option B): only treat a pending row as a live duplicate-in-progress
+    // if created in the last 10 minutes. Old check used expires_at (7-day
+    // default), so an abandoned/never-confirmed bill from days earlier could
+    // falsely flag a brand-new unrelated upload as a duplicate.
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
     const { data } = await supabase
       .from('pending_confirmations')
       .select('payload, created_at')
       .eq('restaurant_id', restaurantId)
       .eq('action', 'confirm_bill')
-      .gt('expires_at', new Date().toISOString())
+      .gt('created_at', tenMinutesAgo)
       .limit(1)
       .maybeSingle();
 
