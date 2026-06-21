@@ -338,31 +338,37 @@ function preParseIntent(body: string): ParsedIntent | null {
     /\baaj\b|\btoday\b/.test(lower)     ? undefined :
     /\bkal\b|\byesterday\b/.test(lower) ? 'yesterday' : 'mtd';
 
-  // ── 0e. AVERAGE QUERY ────────────────────────────────────────────
-  // e.g. "average daily sales for this month", "ausat sales", "avg milk cost"
-  // Must come BEFORE section 1 (trend), since "average daily sales" contains
-  // "daily" which would otherwise be caught by the trend/day-wise pattern.
-  if (/\baverage\b|\bavg\b|\bauasat\b|\baushat\b/.test(lower)) {
-    let avgMetric = 'sales';
-    for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
-      if (pattern.test(lower) && column !== 'sales') { avgMetric = column; break; }
-    }
-    if (avgMetric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) avgMetric = 'cogs';
+  // ── 0d2. EXPLICIT DATE RANGE (works for plain totals AND average) ───
+  // e.g. "Total Sales from 1 May to 21 May", "average daily sales from
+  // 1st June to 16 June", "first 16 days of the month".
+  // FIX: this used to live ONLY inside the average-query branch (0e below),
+  // so a plain "Total Sales from X to Y" with no "average" keyword never
+  // matched it and fell through to an unrelated fallback (today's sales).
+  // Now it runs unconditionally and only tags average:true if that keyword
+  // is actually present in the message.
+  {
+    const isAvgKeyword = /\baverage\b|\bavg\b|\bauasat\b|\baushat\b/.test(lower);
 
-    // Detect "first N days of [month]" — e.g. "first 16 days of the month"
+    let rangeMetric = 'sales';
+    for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+      if (pattern.test(lower) && column !== 'sales') { rangeMetric = column; break; }
+    }
+    if (rangeMetric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) rangeMetric = 'cogs';
+
+    // "first N days of [month]" — e.g. "first 16 days of the month"
     const firstNDaysMatch = lower.match(/(?:first|pehle?)\s+(\d+)\s+days?/);
     if (firstNDaysMatch) {
       const n = parseInt(firstNDaysMatch[1]);
       const specMonth = extractSpecificMonth(lower);
-      const nowIST3 = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-      const baseMonth = specMonth || nowIST3.toISOString().slice(0, 7); // YYYY-MM
+      const nowISTfd = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      const baseMonth = specMonth || nowISTfd.toISOString().slice(0, 7); // YYYY-MM
       const [by, bm] = baseMonth.split('-').map(Number);
       const startD = `${baseMonth}-01`;
       const endD = new Date(by, bm - 1, n).toISOString().split('T')[0];
-      return { intent: 'query_specific', metric: avgMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: true } as any;
+      return { intent: 'query_specific', metric: rangeMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: isAvgKeyword } as any;
     }
 
-    // Detect explicit date range — "from 1st June to 16 June", "1 June to 16 June 2026"
+    // Explicit date range — "from 1 May to 21 May", "1st June to 16 June 2026"
     const rangeMatch = lower.match(/(?:from\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)(?:\s+(20\d{2}))?\s+(?:to|till|-)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*)?(?:\s+(20\d{2}))?/i);
     if (rangeMatch) {
       const d1 = parseInt(rangeMatch[1]);
@@ -374,9 +380,24 @@ function preParseIntent(body: string): ParsedIntent | null {
       if (m1 && m2) {
         const startD = `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
         const endD   = `${y2}-${String(m2).padStart(2, '0')}-${String(d2).padStart(2, '0')}`;
-        return { intent: 'query_specific', metric: avgMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: true } as any;
+        return { intent: 'query_specific', metric: rangeMetric, period: 'explicit_range', startDate: startD, endDate: endD, average: isAvgKeyword } as any;
       }
     }
+  }
+
+  // ── 0e. AVERAGE QUERY (non-range cases: this month, last month, last N days) ──
+  // e.g. "average daily sales for this month", "ausat sales", "avg milk cost"
+  // Must come BEFORE section 1 (trend), since "average daily sales" contains
+  // "daily" which would otherwise be caught by the trend/day-wise pattern.
+  // NOTE: explicit date ranges and "first N days" are now handled above in
+  // 0d2 (runs for both plain totals and averages) — this section only
+  // handles the remaining average-specific period shapes.
+  if (/\baverage\b|\bavg\b|\bauasat\b|\baushat\b/.test(lower)) {
+    let avgMetric = 'sales';
+    for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
+      if (pattern.test(lower) && column !== 'sales') { avgMetric = column; break; }
+    }
+    if (avgMetric === 'sales' && /expense|cost|cogs|kharch/.test(lower)) avgMetric = 'cogs';
 
     const specificMonth = extractSpecificMonth(lower);
     if (specificMonth) {
