@@ -16,6 +16,24 @@ interface RestaurantStat {
   mtd_bills: number;
 }
 
+interface MessageRow {
+  id: string;
+  restaurant_id: string | null;
+  whatsapp_number: string;
+  direction: 'inbound' | 'outbound';
+  body: string;
+  media_url: string | null;
+  intent: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+interface RestaurantBasic {
+  id: string;
+  name: string;
+  whatsapp_number: string;
+}
+
 async function getStats(): Promise<RestaurantStat[]> {
   const supabase = createClient(
     process.env.SUPABASE_URL!,
@@ -24,6 +42,51 @@ async function getStats(): Promise<RestaurantStat[]> {
   const { data, error } = await supabase.from('admin_restaurant_stats').select('*');
   if (error) throw error;
   return (data || []) as RestaurantStat[];
+}
+
+async function getRestaurantsBasic(): Promise<RestaurantBasic[]> {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const { data, error } = await supabase
+    .from('restaurants')
+    .select('id, name, whatsapp_number')
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data || []) as RestaurantBasic[];
+}
+
+async function getMessages(restaurantId: string, limit = 200): Promise<MessageRow[]> {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []) as MessageRow[];
+}
+
+// Counts errors in the last N hours across all restaurants — used for the
+// "crashes" indicator so you can spot trouble without opening every thread.
+async function getRecentErrorCount(hours = 24): Promise<number> {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .not('error', 'is', null)
+    .gte('created_at', since);
+  if (error) return 0;
+  return count || 0;
 }
 
 function pct(entered: number, total: number): number {
@@ -46,11 +109,18 @@ function lastEntryLabel(days: number | null): string {
   return `${days}d ago ⚠️`;
 }
 
+function formatChatTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    hour12: true, timeZone: 'Asia/Kolkata',
+  });
+}
+
 // Next.js 15: searchParams must be awaited
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; tab?: string; restaurant?: string }>;
 }) {
   const params = await searchParams;
   const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -69,6 +139,47 @@ export default async function AdminPage({
     );
   }
 
+  const activeTab = params.tab === 'conversations' ? 'conversations' : 'dashboard';
+  const tokenQS = `token=${params.token}`;
+
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  // Shared page shell styles
+  const page = { fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', background: '#0f172a', color: '#e2e8f0', minHeight: '100vh', padding: '24px 32px' };
+  const tabBar = { display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid #1e293b' };
+  const tabBtn = (isActive: boolean) => ({
+    padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    color: isActive ? '#f8fafc' : '#64748b',
+    borderBottom: isActive ? '2px solid #3b82f6' : '2px solid transparent',
+    textDecoration: 'none', display: 'inline-block',
+  });
+
+  return (
+    <div style={page}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f8fafc', margin: 0 }}>🏪 Hisaab AI — Admin</h1>
+          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>{now} IST</p>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={tabBar}>
+        <a href={`?${tokenQS}&tab=dashboard`} style={tabBtn(activeTab === 'dashboard')}>📊 Dashboard</a>
+        <a href={`?${tokenQS}&tab=conversations`} style={tabBtn(activeTab === 'conversations')}>💬 Conversations</a>
+      </div>
+
+      {activeTab === 'dashboard'
+        ? await DashboardTab({ tokenQS })
+        : await ConversationsTab({ params, tokenQS })}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// DASHBOARD TAB (existing functionality, unchanged)
+// ════════════════════════════════════════════════════════════════════
+async function DashboardTab({ tokenQS }: { tokenQS: string }) {
   let stats: RestaurantStat[] = [];
   let fetchError = '';
   try {
@@ -77,23 +188,11 @@ export default async function AdminPage({
     fetchError = e.message || 'Unknown error';
   }
 
-  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
   const totalRevenue = stats.reduce((s, r) => s + Number(r.mtd_revenue || 0), 0);
   const needsAttention = stats.filter(r => (r.days_since_last_entry ?? 99) > 3).length;
 
   return (
-    <div style={{ fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', background: '#0f172a', color: '#e2e8f0', minHeight: '100vh', padding: '24px 32px' }}>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f8fafc', margin: 0 }}>🏪 Hisaab AI — Admin</h1>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>
-            {now} IST · {stats.length} restaurant{stats.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <a href={`?token=${params.token}`} style={{ color: '#3b82f6', fontSize: 12, textDecoration: 'none' }}>↻ Refresh</a>
-      </div>
-
+    <div>
       {fetchError && (
         <div style={{ background: '#7f1d1d', borderRadius: 8, padding: '12px 16px', marginBottom: 24, fontSize: 13 }}>
           ⚠️ DB Error: {fetchError}
@@ -101,7 +200,7 @@ export default async function AdminPage({
       )}
 
       {/* Summary cards */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' as const }}>
         {[
           { n: stats.filter(r => r.is_active).length, l: 'Active Restaurants' },
           { n: needsAttention, l: 'Need Attention (3+ days)', alert: needsAttention > 0 },
@@ -117,17 +216,17 @@ export default async function AdminPage({
 
       {/* Table */}
       <div style={{ background: '#1e293b', borderRadius: 12, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
           <thead>
             <tr>
               {['Restaurant', 'WhatsApp', 'Status', 'Last Entry', 'MTD Completeness', 'MTD Revenue', 'MTD Food Cost', 'Bills', 'Joined'].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '10px 12px', background: '#1e293b', color: '#94a3b8', fontWeight: 500, borderBottom: '1px solid #334155' }}>{h}</th>
+                <th key={h} style={{ textAlign: 'left' as const, padding: '10px 12px', background: '#1e293b', color: '#94a3b8', fontWeight: 500, borderBottom: '1px solid #334155' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {stats.length === 0 && !fetchError && (
-              <tr><td colSpan={9} style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No restaurants found</td></tr>
+              <tr><td colSpan={9} style={{ padding: 32, textAlign: 'center' as const, color: '#64748b' }}>No restaurants found</td></tr>
             )}
             {stats.map(r => {
               const p = pct(r.mtd_entry_days, r.days_in_month_so_far);
@@ -152,8 +251,8 @@ export default async function AdminPage({
                   </td>
                   <td style={td}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ position: 'relative', height: 6, width: 80, borderRadius: 3, background: '#334155' }}>
-                        <div style={{ position: 'absolute', top: 0, left: 0, height: 6, borderRadius: 3, width: `${Math.min(p, 100)}%`, background: p >= 80 ? '#22c55e' : p >= 50 ? '#eab308' : '#ef4444' }} />
+                      <div style={{ position: 'relative' as const, height: 6, width: 80, borderRadius: 3, background: '#334155' }}>
+                        <div style={{ position: 'absolute' as const, top: 0, left: 0, height: 6, borderRadius: 3, width: `${Math.min(p, 100)}%`, background: p >= 80 ? '#22c55e' : p >= 50 ? '#eab308' : '#ef4444' }} />
                       </div>
                       <span style={{ fontSize: 12, color: p >= 80 ? '#22c55e' : p >= 50 ? '#eab308' : '#f87171' }}>{p}%</span>
                     </div>
@@ -181,6 +280,161 @@ export default async function AdminPage({
 
       <p style={{ marginTop: 16, fontSize: 11, color: '#334155' }}>
         Hisaab AI Admin · Deleted entries recoverable via <code>deleted_entries</code> table in Supabase.
+      </p>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CONVERSATIONS TAB — per-restaurant WhatsApp-style chat thread
+// ════════════════════════════════════════════════════════════════════
+async function ConversationsTab({
+  params,
+  tokenQS,
+}: {
+  params: { token?: string; tab?: string; restaurant?: string };
+  tokenQS: string;
+}) {
+  let restaurants: RestaurantBasic[] = [];
+  let fetchError = '';
+  let recentErrorCount = 0;
+
+  try {
+    [restaurants, recentErrorCount] = await Promise.all([
+      getRestaurantsBasic(),
+      getRecentErrorCount(24),
+    ]);
+  } catch (e: any) {
+    fetchError = e.message || 'Unknown error';
+  }
+
+  const selectedId = params.restaurant || (restaurants[0]?.id ?? '');
+  const selected = restaurants.find(r => r.id === selectedId);
+
+  let messages: MessageRow[] = [];
+  if (selectedId) {
+    try {
+      messages = await getMessages(selectedId);
+    } catch (e: any) {
+      fetchError = fetchError || e.message;
+    }
+  }
+
+  const errorCountInThread = messages.filter(m => m.error).length;
+
+  return (
+    <div>
+      {recentErrorCount > 0 && (
+        <div style={{ background: '#7f1d1d33', border: '1px solid #7f1d1d', borderRadius: 8, padding: '10px 16px', marginBottom: 20, fontSize: 13, color: '#fca5a5' }}>
+          ⚠️ {recentErrorCount} error{recentErrorCount !== 1 ? 's' : ''} logged across all restaurants in the last 24 hours.
+        </div>
+      )}
+
+      {fetchError && (
+        <div style={{ background: '#7f1d1d', borderRadius: 8, padding: '12px 16px', marginBottom: 24, fontSize: 13 }}>
+          ⚠️ DB Error: {fetchError}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 20, minHeight: 500 }}>
+        {/* Restaurant list (left sidebar) */}
+        <div style={{ width: 240, background: '#1e293b', borderRadius: 12, overflow: 'hidden', flexShrink: 0, alignSelf: 'flex-start' as const }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #334155', fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>
+            RESTAURANTS ({restaurants.length})
+          </div>
+          {restaurants.length === 0 && (
+            <div style={{ padding: 16, fontSize: 13, color: '#64748b' }}>No restaurants found</div>
+          )}
+          {restaurants.map(r => {
+            const isSelected = r.id === selectedId;
+            return (
+              <a
+                key={r.id}
+                href={`?${tokenQS}&tab=conversations&restaurant=${r.id}`}
+                style={{
+                  display: 'block', padding: '12px 16px', textDecoration: 'none',
+                  background: isSelected ? '#334155' : 'transparent',
+                  borderLeft: isSelected ? '3px solid #3b82f6' : '3px solid transparent',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#f8fafc' : '#cbd5e1' }}>{r.name}</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>{r.whatsapp_number}</div>
+              </a>
+            );
+          })}
+        </div>
+
+        {/* Chat thread (right panel) */}
+        <div style={{ flex: 1, background: '#0b141a', borderRadius: 12, display: 'flex', flexDirection: 'column' as const, overflow: 'hidden', border: '1px solid #1e293b' }}>
+          {/* Thread header */}
+          <div style={{ padding: '14px 20px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc' }}>{selected?.name || 'No restaurant selected'}</div>
+              <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>{selected?.whatsapp_number || ''}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              {errorCountInThread > 0 && (
+                <span style={{ fontSize: 11, color: '#f87171', background: '#7f1d1d33', padding: '3px 8px', borderRadius: 99 }}>
+                  ⚠️ {errorCountInThread} error{errorCountInThread !== 1 ? 's' : ''}
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: '#64748b' }}>{messages.length} messages</span>
+              {selectedId && (
+                <a href={`?${tokenQS}&tab=conversations&restaurant=${selectedId}`} style={{ color: '#3b82f6', fontSize: 11, textDecoration: 'none' }}>↻ Refresh</a>
+              )}
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div style={{
+            flex: 1, padding: '20px', overflowY: 'auto' as const,
+            backgroundImage: 'radial-gradient(circle, #16202622 1px, transparent 1px)',
+            backgroundSize: '16px 16px',
+            display: 'flex', flexDirection: 'column' as const, gap: 4,
+            maxHeight: 600,
+          }}>
+            {messages.length === 0 && (
+              <div style={{ textAlign: 'center' as const, color: '#475569', fontSize: 13, marginTop: 40 }}>
+                {selectedId ? 'No messages yet for this restaurant.' : 'Select a restaurant to view its conversation.'}
+              </div>
+            )}
+            {messages.map(m => {
+              const isInbound = m.direction === 'inbound';
+              const hasError = !!m.error;
+              return (
+                <div key={m.id} style={{ display: 'flex', justifyContent: isInbound ? 'flex-start' : 'flex-end' }}>
+                  <div style={{
+                    maxWidth: '70%',
+                    background: hasError ? '#7f1d1d55' : isInbound ? '#1e293b' : '#005c4b',
+                    border: hasError ? '1px solid #dc2626' : 'none',
+                    borderRadius: 10,
+                    padding: '8px 12px',
+                    marginBottom: 4,
+                  }}>
+                    {m.media_url && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>📎 Media attached</div>
+                    )}
+                    <div style={{ fontSize: 13, color: '#e2e8f0', whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
+                      {m.body || <span style={{ color: '#64748b', fontStyle: 'italic' as const }}>(empty)</span>}
+                    </div>
+                    {hasError && (
+                      <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 6, paddingTop: 6, borderTop: '1px solid #dc262655' }}>
+                        ⚠️ {m.error}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 4, textAlign: 'right' as const }}>
+                      {formatChatTime(m.created_at)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <p style={{ marginTop: 16, fontSize: 11, color: '#334155' }}>
+        Inbound = restaurant owner's message · Outbound = bot's reply · Red border = error during processing.
       </p>
     </div>
   );
