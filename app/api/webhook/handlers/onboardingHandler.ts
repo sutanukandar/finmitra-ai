@@ -82,7 +82,7 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
     // FIX: restaurant now exists (newRestaurant.id) — pass it so this
     // welcome message is correctly attributed in the conversation log.
     await sendMessage(from,
-      `✅ Welcome to Hisaab AI, ${cleanName}! 🎉\n\n` +
+      `✅ Welcome to FinMitra AI, ${cleanName}! 🎉\n\n` +
       `You're all set up. Here's how to get started:\n\n` +
       `📥 *Log today's sales:*\n` +
       `   "Sales 4200"\n\n` +
@@ -113,7 +113,7 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
 
   // No restaurant row exists yet → restaurantId is null
   await sendMessage(from,
-    `👋 Welcome to *Hisaab AI*!\n\n` +
+    `👋 Welcome to *FinMitra AI*!\n\n` +
     `I'm your restaurant's AI finance assistant — track sales, expenses, and P&L right here on WhatsApp.\n\n` +
     `Let's get you set up. *What's your restaurant or outlet's name?*`,
     null
