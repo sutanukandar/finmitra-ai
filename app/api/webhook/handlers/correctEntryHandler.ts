@@ -1,5 +1,6 @@
 import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 export async function handleCorrectEntry(
   from: string,
@@ -11,7 +12,7 @@ export async function handleCorrectEntry(
   const date = parsed.date || today;
 
   if (!category) {
-    await sendMessage(from, "Could not identify which category to correct. Please try again (e.g. 'sales kal 4200 karo').");
+    await sendMessage(from, "Could not identify which category to correct. Please try again (e.g. 'sales kal 4200 karo').", restaurantId);
     return;
   }
 
@@ -23,7 +24,7 @@ export async function handleCorrectEntry(
     const newAmount = parsed.new_amount ?? 0;
 
     if (parsed.new_amount === undefined) {
-      await sendMessage(from, "Please mention the new amount. Example: 'sales kal 4200 karo'.");
+      await sendMessage(from, "Please mention the new amount. Example: 'sales kal 4200 karo'.", restaurantId);
       return;
     }
 
@@ -38,14 +39,15 @@ export async function handleCorrectEntry(
       `${displayCat} for ${dateLabel}\n` +
       `Current: ₹${currentVal.toLocaleString('en-IN')}\n` +
       `New: ₹${newAmount.toLocaleString('en-IN')}\n\n` +
-      `Reply *haan* to save · *nahi* to cancel`
+      `Reply *haan* to save · *nahi* to cancel`,
+      restaurantId
     );
 
   } else if (parsed.intent === 'correct_entry_reduce') {
     const reduceBy = parsed.reduce_by ?? 0;
 
     if (parsed.reduce_by === undefined) {
-      await sendMessage(from, "Please mention the amount to reduce by. Example: 'sales se 500 kato'.");
+      await sendMessage(from, "Please mention the amount to reduce by. Example: 'sales se 500 kato'.", restaurantId);
       return;
     }
 
@@ -63,7 +65,8 @@ export async function handleCorrectEntry(
       `Current: ₹${currentVal.toLocaleString('en-IN')}\n` +
       `Reduce by: ₹${reduceBy.toLocaleString('en-IN')}\n` +
       `New: ₹${newAmount.toLocaleString('en-IN')}\n\n` +
-      `Reply *haan* to save · *nahi* to cancel`
+      `Reply *haan* to save · *nahi* to cancel`,
+      restaurantId
     );
   }
 }
@@ -71,17 +74,5 @@ export async function handleCorrectEntry(
 function formatDate(isoDate: string): string {
   return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
-  });
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to:   `whatsapp:${to}`,
-    body,
   });
 }

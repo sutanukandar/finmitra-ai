@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { dataService } from '../../../../lib/db/dataService';
 import { ParsedIntent } from '../types';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -83,7 +84,7 @@ async function handleMultiMonthIngredient(
     const canonicalList = [...new Set((allRows || []).map((r: any) => r.item_canonical as string).filter(Boolean))];
 
     if (canonicalList.length === 0) {
-      await sendMessage(from, `No bill data found. Upload bills first to track ingredient expenses.`);
+      await sendMessage(from, `No bill data found. Upload bills first to track ingredient expenses.`, restaurantId);
       return;
     }
 
@@ -95,7 +96,8 @@ async function handleMultiMonthIngredient(
 
     if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) {
       await sendMessage(from,
-        `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${canonicalList.slice(0, 6).join(', ')}${canonicalList.length > 6 ? '…' : ''}`
+        `No purchases found for "${ingredient}" in your bills.\n\nKnown items: ${canonicalList.slice(0, 6).join(', ')}${canonicalList.length > 6 ? '…' : ''}`,
+        restaurantId
       );
       return;
     }
@@ -138,7 +140,8 @@ async function handleMultiMonthIngredient(
 
   const label = resolvedIngredient.charAt(0).toUpperCase() + resolvedIngredient.slice(1);
   await sendMessage(from,
-    `📦 *${label} — Last ${months.length} Months*\n\n${lines.join('\n')}\n\nTotal: ₹${Math.round(grandTotal).toLocaleString('en-IN')}`
+    `📦 *${label} — Last ${months.length} Months*\n\n${lines.join('\n')}\n\nTotal: ₹${Math.round(grandTotal).toLocaleString('en-IN')}`,
+    restaurantId
   );
 }
 
@@ -176,7 +179,7 @@ export async function handlePnlQuery(
         .eq('restaurant_id', restaurantId).gte('date', startDate).lte('date', endDate);
 
       if (!entries || entries.length === 0) {
-        await sendMessage(from, 'No data found for this period.');
+        await sendMessage(from, 'No data found for this period.', restaurantId);
         return;
       }
 
@@ -219,7 +222,7 @@ export async function handlePnlQuery(
       });
 
       const label = metricLabels[metric] || metric.charAt(0).toUpperCase() + metric.slice(1);
-      await sendMessage(from, `📊 *${label} — Last ${parsed.months.length} Months*\n\n${lines.join('\n')}`);
+      await sendMessage(from, `📊 *${label} — Last ${parsed.months.length} Months*\n\n${lines.join('\n')}`, restaurantId);
       return;
     }
 
@@ -262,7 +265,7 @@ export async function handlePnlQuery(
       }
 
       const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
-      if (error || !entries || entries.length === 0) { await sendMessage(from, "No data found for this period yet."); return; }
+      if (error || !entries || entries.length === 0) { await sendMessage(from, "No data found for this period yet.", restaurantId); return; }
 
       let sales = 0, swiggy = 0, zomato = 0, phonepe = 0;
       let hyperpure = 0, bigbasket = 0, dmart = 0, milk = 0, bread = 0, water = 0, other = 0;
@@ -314,7 +317,7 @@ export async function handlePnlQuery(
           ? `${period_label} Average Daily ${label}: ₹${(total / numDays).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (over ${numDays} days)`
           : `${period_label} ${label}: ₹${total.toLocaleString('en-IN')}`;
       }
-      await sendMessage(from, reply);
+      await sendMessage(from, reply, restaurantId);
       return;
     }
 
@@ -331,7 +334,7 @@ export async function handlePnlQuery(
         .eq('restaurant_id', restaurantId).gte('date', startDate).lte('date', endDate)
         .not('item_canonical', 'is', null).not('item_canonical', 'ilike', '%delivery%').not('item_canonical', 'ilike', '%small order%');
 
-      if (!items || items.length === 0) { await sendMessage(from, 'No item-level data found.'); return; }
+      if (!items || items.length === 0) { await sendMessage(from, 'No item-level data found.', restaurantId); return; }
 
       const filtered = parsed.vendor_filter ? (items as any[]).filter((r: any) => (r.vendor||'').toLowerCase().includes(parsed.vendor_filter)) : (items as any[]);
       const grouped: Record<string, { qty: number; unit: string; spend: number }> = {};
@@ -344,19 +347,19 @@ export async function handlePnlQuery(
 
       const sortKey = parsed.sort_by === 'weight' ? 'qty' : 'spend';
       const sorted = Object.entries(grouped).sort((a,b) => b[1][sortKey]-a[1][sortKey]).slice(0, parsed.limit||5);
-      if (sorted.length === 0) { await sendMessage(from, 'No item-level data found.'); return; }
+      if (sorted.length === 0) { await sendMessage(from, 'No item-level data found.', restaurantId); return; }
 
       const grandTotal = sorted.reduce((s,[,d]) => s+d.spend, 0);
       let periodLabel = parsed.period === 'specific_month' && parsed.month ? new Date(parsed.month+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'}) : parsed.period === 'today' ? 'Today' : `${new Date().toLocaleString('en-IN',{month:'long'})} so far`;
       const lines = sorted.map(([name,d],idx) => `${idx+1}. ${name} — ₹${d.spend.toLocaleString('en-IN')}${d.qty>0?` (${d.qty.toFixed(2)} ${d.unit})`:''}`);
-      await sendMessage(from, `🛒 *Top Items — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`);
+      await sendMessage(from, `🛒 *Top Items — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`, restaurantId);
       return;
     }
 
     // ── query_ingredient ─────────────────────────────────────────────────
     if (parsed?.intent === 'query_ingredient') {
       let ingredient = (parsed as any).ingredient || '';
-      if (!ingredient) { await sendMessage(from, "Which ingredient? e.g. \"how much Carrot did I buy this month\""); return; }
+      if (!ingredient) { await sendMessage(from, "Which ingredient? e.g. \"how much Carrot did I buy this month\"", restaurantId); return; }
 
       // FIX: build a search STEM that is a substring of both singular and
       // plural forms, rather than trying to convert one into the other.
@@ -443,13 +446,14 @@ export async function handlePnlQuery(
             `📦 *${ingredient} — Last Purchase*\n\n` +
             `📅 ${dateLabel}\n` +
             `💰 ₹${(textEntryAmount || 0).toLocaleString('en-IN')}\n` +
-            `🏪 Local Market (direct entry)`
+            `🏪 Local Market (direct entry)`,
+            restaurantId
           );
           return;
         }
 
         if (!billDate) {
-          await sendMessage(from, `No ${ingredient} purchases found in bill history.`);
+          await sendMessage(from, `No ${ingredient} purchases found in bill history.`, restaurantId);
           return;
         }
 
@@ -462,7 +466,8 @@ export async function handlePnlQuery(
           `📦 *${ingredient} — Last Purchase*\n\n` +
           `📅 ${dateLabel}\n` +
           `💰 ₹${Number(r.amount).toLocaleString('en-IN')} — ${Number(r.quantity).toFixed(2)} ${unit}\n` +
-          `🏪 ${r.vendor}`
+          `🏪 ${r.vendor}`,
+          restaurantId
         );
         return;
       }
@@ -481,7 +486,7 @@ export async function handlePnlQuery(
         if (canonicalList.length > 0) {
           const aiResponse = await anthropic.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 50, messages: [{ role: 'user', content: `The user asked about "${ingredient}". From: ${canonicalList.join(', ')}. Which matches? Reply ONLY the exact name or "NO_MATCH".` }] });
           const resolved = aiResponse.content[0]?.type === 'text' ? aiResponse.content[0].text.trim() : 'NO_MATCH';
-          if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) { await sendMessage(from, `No purchases found for "${ingredient}".\n\nKnown items: ${canonicalList.slice(0,5).join(', ')}${canonicalList.length>5?'…':''}`); return; }
+          if (resolved === 'NO_MATCH' || !canonicalList.includes(resolved)) { await sendMessage(from, `No purchases found for "${ingredient}".\n\nKnown items: ${canonicalList.slice(0,5).join(', ')}${canonicalList.length>5?'…':''}`, restaurantId); return; }
           ingredient = resolved;
         }
       }
@@ -502,13 +507,13 @@ export async function handlePnlQuery(
       const periodLabel  = parsed.period === 'specific_month' && parsed.month ? new Date(parsed.month+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'}) : parsed.period === 'today' ? 'Today' : `${new Date(today).toLocaleString('en-IN',{month:'long'})} so far`;
 
       if (!rows || rows.length === 0) {
-        if (pnlTotal > 0) { await sendMessage(from, `📦 *${ingredient} — ${periodLabel}*\n\nTotal: ₹${pnlTotal.toLocaleString('en-IN')}\n  • Daily entries: ₹${pnlTotal.toLocaleString('en-IN')}`); }
+        if (pnlTotal > 0) { await sendMessage(from, `📦 *${ingredient} — ${periodLabel}*\n\nTotal: ₹${pnlTotal.toLocaleString('en-IN')}\n  • Daily entries: ₹${pnlTotal.toLocaleString('en-IN')}`, restaurantId); }
         else {
           const { data: lp } = await supabase.from('invoice_items').select('date, amount, quantity, unit, vendor').eq('restaurant_id', restaurantId).ilike('item_canonical', `%${ingredient}%`).order('date', { ascending: false }).limit(1);
           if (lp && lp.length > 0) {
             const r = lp[0] as any;
-            await sendMessage(from, `No ${ingredient} in ${periodLabel}.\n\nLast: ${new Date(r.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})} — ₹${Number(r.amount).toLocaleString('en-IN')} (${Number(r.quantity).toFixed(2)} ${r.unit} from ${r.vendor})`);
-          } else { await sendMessage(from, `No ${ingredient} purchases found.`); }
+            await sendMessage(from, `No ${ingredient} in ${periodLabel}.\n\nLast: ${new Date(r.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})} — ₹${Number(r.amount).toLocaleString('en-IN')} (${Number(r.quantity).toFixed(2)} ${r.unit} from ${r.vendor})`, restaurantId);
+          } else { await sendMessage(from, `No ${ingredient} purchases found.`, restaurantId); }
         }
         return;
       }
@@ -522,7 +527,7 @@ export async function handlePnlQuery(
       const vendorLines = Object.entries(byVendor).sort((a,b)=>b[1].spend-a[1].spend).map(([v,d]) => `  • ${v}: ${d.qty.toFixed(2)} ${unit} — ₹${d.spend.toLocaleString('en-IN')}`);
       if (pnlTotal > 0) vendorLines.push(`  • Daily entries: ₹${pnlTotal.toLocaleString('en-IN')}`);
 
-      await sendMessage(from, `📦 *${ingredient} — ${periodLabel}*\n\nTotal bought : ${totalQty.toFixed(2)} ${unit}\nTotal spent  : ₹${grandTotal.toLocaleString('en-IN')}\nAvg rate     : ₹${avgRate.toFixed(0)}/${unit}\nPurchases    : ${rows.length}${pnlTotal > 0?' (bills) + daily entries':''}\n\nBy source:\n${vendorLines.join('\n')}`);
+      await sendMessage(from, `📦 *${ingredient} — ${periodLabel}*\n\nTotal bought : ${totalQty.toFixed(2)} ${unit}\nTotal spent  : ₹${grandTotal.toLocaleString('en-IN')}\nAvg rate     : ₹${avgRate.toFixed(0)}/${unit}\nPurchases    : ${rows.length}${pnlTotal > 0?' (bills) + daily entries':''}\n\nBy source:\n${vendorLines.join('\n')}`, restaurantId);
       return;
     }
 
@@ -534,7 +539,7 @@ export async function handlePnlQuery(
       else { startDate=monthStart; endDate=today; }
 
       const { data: items } = await supabase.from('invoice_items').select('vendor, amount').eq('restaurant_id', restaurantId).gte('date', startDate).lte('date', endDate);
-      if (!items || items.length === 0) { await sendMessage(from, 'No expense data found.'); return; }
+      if (!items || items.length === 0) { await sendMessage(from, 'No expense data found.', restaurantId); return; }
 
       const normalise = (v: string) => { const lv=(v||'').toLowerCase(); if (lv.includes('hyperpure')||lv.includes('zomato')) return 'Hyperpure'; if (lv.includes('bigbasket')||lv.includes('bbnow')||lv.includes('innovative retail')) return 'BigBasket'; if (lv.includes('dmart')||lv.includes('avenue e-commerce')||lv.includes('avenue e commerce')) return 'DMart'; return v.trim(); };
       const grouped: Record<string, number> = {};
@@ -542,7 +547,7 @@ export async function handlePnlQuery(
       const sorted = Object.entries(grouped).sort((a,b)=>b[1]-a[1]);
       const grandTotal = sorted.reduce((s,[,v])=>s+v, 0);
       const periodLabel = parsed.period === 'specific_month' && parsed.month ? new Date(parsed.month+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'}) : parsed.period === 'today' ? 'Today' : `${new Date().toLocaleString('en-IN',{month:'long'})} so far`;
-      await sendMessage(from, `📊 *Expenses by Vendor — ${periodLabel}*\n\n${sorted.map(([v,s],i)=>`${i+1}. ${v} — ₹${s.toLocaleString('en-IN')}`).join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`);
+      await sendMessage(from, `📊 *Expenses by Vendor — ${periodLabel}*\n\n${sorted.map(([v,s],i)=>`${i+1}. ${v} — ₹${s.toLocaleString('en-IN')}`).join('\n')}\n\nTotal: ₹${grandTotal.toLocaleString('en-IN')}`, restaurantId);
       return;
     }
 
@@ -574,7 +579,7 @@ export async function handlePnlQuery(
       }
 
       const { data: entries } = await supabase.from('pnl_entries').select(PNL_SELECT).eq('restaurant_id', restaurantId).gte('date', startDate).lte('date', endDate).order('date', { ascending: true });
-      if (!entries || entries.length === 0) { await sendMessage(from, 'No data found.'); return; }
+      if (!entries || entries.length === 0) { await sendMessage(from, 'No data found.', restaurantId); return; }
 
       const metric = (parsed as any).metric || 'revenue';
       const getValue = (e: any): number => {
@@ -589,10 +594,10 @@ export async function handlePnlQuery(
       const metricLabel = LABELS[metric]||(metric.charAt(0).toUpperCase()+metric.slice(1));
 
       const lines = (entries as any[]).map(e => ({ dateLabel: new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',timeZone:'Asia/Kolkata'}), val: getValue(e) })).filter(({val})=>val>0).map(({dateLabel,val})=>`${dateLabel}: ₹${val.toLocaleString('en-IN')}`);
-      if (lines.length === 0) { await sendMessage(from, `No ${metricLabel} data for ${periodLabel}.`); return; }
+      if (lines.length === 0) { await sendMessage(from, `No ${metricLabel} data for ${periodLabel}.`, restaurantId); return; }
 
       const total = (entries as any[]).reduce((s,e)=>s+getValue(e), 0);
-      await sendMessage(from, `📅 *${metricLabel} — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`);
+      await sendMessage(from, `📅 *${metricLabel} — ${periodLabel}*\n\n${lines.join('\n')}\n\nTotal: ₹${total.toLocaleString('en-IN')}`, restaurantId);
       return;
     }
 
@@ -606,7 +611,7 @@ export async function handlePnlQuery(
       if (vendor) query = (query as any).eq('pnl_field', vendor);
       const { data: records } = await (query as any).order('created_at', { ascending: false }).limit(limit);
 
-      if (!records || records.length === 0) { await sendMessage(from, `No ${vendor ? vendor.charAt(0).toUpperCase()+vendor.slice(1) : ''} uploads found.`); return; }
+      if (!records || records.length === 0) { await sendMessage(from, `No ${vendor ? vendor.charAt(0).toUpperCase()+vendor.slice(1) : ''} uploads found.`, restaurantId); return; }
 
       if (target === 'last') {
         const r = records[0] as any;
@@ -616,10 +621,10 @@ export async function handlePnlQuery(
         const { data: items } = await supabase.from('invoice_items').select('item_name, quantity, unit, amount').eq('upload_record_id', r.id).order('amount', { ascending: false }).limit(10);
         let reply = `📋 *Last ${vendorLabel} Bill*\nBill date : ${billDate}\nAmount    : ₹${Number(r.amount).toLocaleString('en-IN')}\nUploaded  : ${uploadedAt}`;
         if (items && items.length > 0) reply += `\n\nItems:\n${(items as any[]).map(i=>`  • ${i.item_name} — ₹${Number(i.amount).toLocaleString('en-IN')}`).join('\n')}`;
-        await sendMessage(from, reply);
+        await sendMessage(from, reply, restaurantId);
       } else {
         const lines = (records as any[]).map((r,i) => { const vl=(r.pnl_field||'Other').charAt(0).toUpperCase()+(r.pnl_field||'other').slice(1); const up=new Date(r.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',timeZone:'Asia/Kolkata'}); return `${i+1}. ${vl} — ₹${Number(r.amount).toLocaleString('en-IN')} (${up})`; });
-        await sendMessage(from, `📋 *Recent Uploads*\n\n${lines.join('\n')}`);
+        await sendMessage(from, `📋 *Recent Uploads*\n\n${lines.join('\n')}`, restaurantId);
       }
       return;
     }
@@ -640,8 +645,8 @@ export async function handlePnlQuery(
       }
 
       const { data: detailEntries } = await dataService.getPnlData(restaurantId, detailStart, detailEnd);
-      if (!detailEntries || detailEntries.length === 0) { await sendMessage(from, "No data found for this period yet."); return; }
-      await sendMessage(from, buildPnlBreakdown(detailEntries, detailLabel));
+      if (!detailEntries || detailEntries.length === 0) { await sendMessage(from, "No data found for this period yet.", restaurantId); return; }
+      await sendMessage(from, buildPnlBreakdown(detailEntries, detailLabel), restaurantId);
       return;
     }
 
@@ -661,11 +666,11 @@ export async function handlePnlQuery(
     } else if (body.includes('aaj')||body.includes('today')||body.includes('p&l')||parsed?.intent === 'query_today'||parsed?.intent === 'query_pnl') {
       startDate=today; endDate=today; periodLabel='Today';
     } else {
-      await sendMessage(from, "Please specify: `aaj ka P&L`, `this month`, or `P&L for Mar 2026`"); return;
+      await sendMessage(from, "Please specify: `aaj ka P&L`, `this month`, or `P&L for Mar 2026`", restaurantId); return;
     }
 
     const { data: entries, error } = await dataService.getPnlData(restaurantId, startDate, endDate);
-    if (error || !entries || entries.length === 0) { await sendMessage(from, "No data found for this period yet."); return; }
+    if (error || !entries || entries.length === 0) { await sendMessage(from, "No data found for this period yet.", restaurantId); return; }
 
     const totals = computePnlTotals(entries);
     await dataService.createPendingConfirmation(restaurantId, { startDate, endDate: endDate||startDate, periodLabel }, 'pnl_context');
@@ -678,12 +683,18 @@ export async function handlePnlQuery(
       `Total Sales  : ₹${Math.round(totals.revenue).toLocaleString('en-IN')}\n` +
       `Item Cost    : ₹${Math.round(totals.cogs).toLocaleString('en-IN')} (${itemCostPct}%)\n` +
       `Fixed Cost   : ₹${Math.round(totals.fixedTotal).toLocaleString('en-IN')} (${fixedCostPct}%)\n\n` +
-      (profit >= 0 ? `💵 *Profit   : ₹${Math.round(profit).toLocaleString('en-IN')}*` : `🔴 *Loss     : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`)
+      (profit >= 0 ? `💵 *Profit   : ₹${Math.round(profit).toLocaleString('en-IN')}*` : `🔴 *Loss     : ₹${Math.round(Math.abs(profit)).toLocaleString('en-IN')}*`),
+      restaurantId
     );
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[QueryHandler] Error:", error);
-    await sendMessage(from, "Unable to fetch P&L right now. Please try again.");
+    await sendMessage(
+      from,
+      "Unable to fetch P&L right now. Please try again.",
+      restaurantId,
+      String(error?.message || error).substring(0, 300)
+    );
   }
 }
 
@@ -778,13 +789,4 @@ function buildPnlBreakdown(entries: any[], periodLabel: string): string {
     `\n🏢 *Fixed Cost*\n${fixedLines.length?fixedLines.join('\n'):'(none)'}\n*Total      : ₹${Math.round(t.fixedTotal).toLocaleString('en-IN')}*`,
     `\n${profitLine}`,
   ].join('\n');
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to: `whatsapp:${to}`,
-    body,
-  });
 }

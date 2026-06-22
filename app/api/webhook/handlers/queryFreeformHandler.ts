@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -70,7 +71,7 @@ export async function handleFreeformQuery(
     .order('date', { ascending: true });
 
   if (!entries || entries.length === 0) {
-    await sendMessage(from, "No P&L data found yet to answer this question.");
+    await sendMessage(from, "No P&L data found yet to answer this question.", restaurantId);
     return;
   }
 
@@ -215,10 +216,12 @@ export async function handleFreeformQuery(
     })
     .join('\n');
 
-  const aiResponse = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 500,
-    system: `You are a financial analyst for a restaurant called ${restaurantName}.
+  let answer: string;
+  try {
+    const aiResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      system: `You are a financial analyst for a restaurant called ${restaurantName}.
 
 All figures are pre-computed and correct. NEVER re-compute or re-aggregate.
 - Sales = QR sales + PhonePe + Swiggy + Zomato
@@ -236,15 +239,25 @@ Be concise — 5 to 8 lines max.
 
 STRICT RULE: Only answer questions about this restaurant's financial data.
 If the question is not about restaurant finances, reply with exactly: OUT_OF_SCOPE`,
-    messages: [{
-      role: 'user',
-      content: `Monthly Summaries:\n${JSON.stringify(months, null, 2)}\n\nDaily Records (use these for day-specific comparisons):\n${dailyRowsText}\n\nIngredient-Level Bill Items (from uploaded bills):\n${invoiceItemsText}\n\nUser question: ${question}\n\nFor questions comparing specific dates, use the Daily Records section. For ingredient breakdown questions, use the Bill Items section. Do NOT say "no data" for any date or item that appears above.`,
-    }],
-  });
+      messages: [{
+        role: 'user',
+        content: `Monthly Summaries:\n${JSON.stringify(months, null, 2)}\n\nDaily Records (use these for day-specific comparisons):\n${dailyRowsText}\n\nIngredient-Level Bill Items (from uploaded bills):\n${invoiceItemsText}\n\nUser question: ${question}\n\nFor questions comparing specific dates, use the Daily Records section. For ingredient breakdown questions, use the Bill Items section. Do NOT say "no data" for any date or item that appears above.`,
+      }],
+    });
 
-  const answer = aiResponse.content[0]?.type === 'text'
-    ? aiResponse.content[0].text.trim()
-    : "Sorry, I couldn't process that question.";
+    answer = aiResponse.content[0]?.type === 'text'
+      ? aiResponse.content[0].text.trim()
+      : "Sorry, I couldn't process that question.";
+  } catch (error: any) {
+    console.error('[FreeformHandler] Claude API error:', error);
+    await sendMessage(
+      from,
+      "Sorry, I couldn't process that question right now. Please try again.",
+      restaurantId,
+      String(error?.message || error).substring(0, 300)
+    );
+    return;
+  }
 
   if (answer === 'OUT_OF_SCOPE') {
     await sendMessage(from,
@@ -254,23 +267,12 @@ If the question is not about restaurant finances, reply with exactly: OUT_OF_SCO
       "• Recording sales (PhonePe, Swiggy, Zomato)\n" +
       "• Uploading bills (BigBasket, Hyperpure, DMart)\n" +
       "• P&L summaries and expense queries\n\n" +
-      "Try: _aaj ka P&L_ or _today sales 3500_"
+      "Try: _aaj ka P&L_ or _today sales 3500_",
+      restaurantId
     );
     return;
   }
 
   console.log(`[FreeformHandler] Answer: ${answer.slice(0, 100)}...`);
-  await sendMessage(from, `🤖 ${answer}`);
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to:   `whatsapp:${to}`,
-    body,
-  });
+  await sendMessage(from, `🤖 ${answer}`, restaurantId);
 }
