@@ -1,5 +1,6 @@
 import { parser } from '../parser';
 import { dataService } from '../../../../lib/db/dataService';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 export async function handleMediaUpload(
   from: string, 
@@ -10,7 +11,7 @@ export async function handleMediaUpload(
   console.log(`[MediaHandler] Processing media for ${restaurantId}. Type: ${mediaType || 'unknown'}, URL: ${mediaUrl?.substring(0, 60)}`);
 
   try {
-    await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.");
+    await sendMessage(from, "📸 Processing your bill... This may take 10-20 seconds.", restaurantId);
 
     // FIX: Log exactly what type is being passed to the parser
     console.log(`[MediaHandler] Calling parser.parseMedia. mediaType=${mediaType}`);
@@ -62,7 +63,8 @@ Items  : ${itemCount} items extracted
 You already have a ${vendor} bill of ₹${existingAmount}
 saved on ${formatDate(billDate)} (uploaded ${uploadedOn})
 
-Reply *haan* to save anyway · *nahi* to cancel`
+Reply *haan* to save anyway · *nahi* to cancel`,
+          restaurantId
         );
 
         // Overwrite any stale pending, save with is_duplicate flag
@@ -80,7 +82,8 @@ Date   : ${formatDate(billDate)}
 Total  : ₹${billTotal}${parseResult.delivery_fee ? ` (incl. ₹${parseResult.delivery_fee} delivery)` : ''}
 Items  : ${itemCount} items extracted
 
-Reply *haan* to save · *nahi* to cancel`
+Reply *haan* to save · *nahi* to cancel`,
+          restaurantId
         );
 
         await dataService.createPendingConfirmation(
@@ -101,13 +104,20 @@ Reply *haan* to save · *nahi* to cancel`
 
 Error: ${errDetail}
 
-Please type manually: hyperpure ${parseResult.total || '0'}`
+Please type manually: hyperpure ${parseResult.total || '0'}`,
+        restaurantId,
+        errDetail
       );
     }
 
   } catch (error: any) {
     console.error("[MediaHandler] Critical error:", error?.message || error);
-    await sendMessage(from, `Sorry, something went wrong.\n\nError: ${String(error?.message || error).substring(0, 100)}\n\nPlease type manually: hyperpure 3482`);
+    await sendMessage(
+      from,
+      `Sorry, something went wrong.\n\nError: ${String(error?.message || error).substring(0, 100)}\n\nPlease type manually: hyperpure 3482`,
+      restaurantId,
+      String(error?.message || error).substring(0, 300)
+    );
   }
 }
 
@@ -123,17 +133,4 @@ function formatDateTime(isoTs: string): string {
   const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
   const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
   return `${date}, ${time}`;
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to: `whatsapp:${to}`,
-    body: body,
-  });
 }

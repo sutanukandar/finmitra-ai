@@ -4,6 +4,7 @@ import { ParsedIntent } from '../types';
 import { handlePnlQuery } from './queryHandler';
 import { handleFreeformQuery } from './queryFreeformHandler';
 import { handleCorrectEntry } from './correctEntryHandler';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 // ── Month name lookup ────────────────────────────────────────────────
 const MONTH_NAME_TO_NUM: Record<string, number> = {
@@ -386,12 +387,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 0e. AVERAGE QUERY (non-range cases: this month, last month, last N days) ──
-  // e.g. "average daily sales for this month", "ausat sales", "avg milk cost"
-  // Must come BEFORE section 1 (trend), since "average daily sales" contains
-  // "daily" which would otherwise be caught by the trend/day-wise pattern.
-  // NOTE: explicit date ranges and "first N days" are now handled above in
-  // 0d2 (runs for both plain totals and averages) — this section only
-  // handles the remaining average-specific period shapes.
   if (/\baverage\b|\bavg\b|\bauasat\b|\baushat\b/.test(lower)) {
     let avgMetric = 'sales';
     for (const { pattern, column } of DIRECT_COLUMN_KEYWORDS) {
@@ -477,7 +472,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // Guard: comparison queries and multi-month queries must bypass sections 3 & 4
-  // "comparison of item cost vs fixed cost for Mar, Apr, May, June" → parser handles it
   const isComparisonQuery = /\bcompar(e|ison|ing)\b|\bversus\b|\bvs\.?\b/.test(lower);
   const monthMatches = lower.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi) || [];
   const hasMultipleMonths = monthMatches.length >= 2;
@@ -493,11 +487,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 4. TOTAL EXPENSES ─────────────────────────────────────────────
-  // Skip if asking about a SPECIFIC ingredient — so parser handles as query_ingredient.
-  // Check 1: known keyword list (butter, zepto, etc.)
-  // Check 2: message contains "on [specific item]" — catches "expense on Butter",
-  //           "how much did i do on French fries", "spent on Carrot", etc.
-  //           Excludes time/general words like "this", "last", "total", "all".
   const hasItemOnPattern = /\bon\s+(?!(?:this|last|that|the|a|an|total|all|everything|my|your|our)\s)\S/.test(lower);
   const hasSpecificIngredient =
     ITEM_COST_KEYWORDS.some(({ pattern }) => pattern.test(lower)) || hasItemOnPattern;
@@ -544,9 +533,6 @@ function preParseIntent(body: string): ParsedIntent | null {
   }
 
   // ── 7. CATCH-ALL: ENTRY WITH UNRECOGNISED CATEGORY ────────────────
-  // e.g. "Food expense for both Chef is 300" — ENTRY_KW has "expense",
-  // amount is 300, no date → save as today's unknown entry, ask-once
-  // flow handles classification ("Is 'Food' a fixed or item cost?").
   const looksLikeQuestion = /^\s*(how|what|when|where|why|give|show|tell|which)\b|[?？]\s*$/.test(lower);
   const amtInMsg = lower.replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*/gi, ' ').match(/\b(\d{2,6})\b/);
   const clearAmount = amtInMsg ? parseInt(amtInMsg[1]) : null;
@@ -693,7 +679,8 @@ export async function handleTextMessage(from: string, restaurantId: string, body
             `Is '${extractedLabel}' a fixed recurring expense (like rent, salary)\n` +
             `or does it vary based on how much you sell?\n\n` +
             `Reply *1* → Fixed Cost\n` +
-            `Reply *2* → Item Cost`
+            `Reply *2* → Item Cost`,
+            restaurantId
           );
           console.log(`[TextHandler] Asked user to classify: ${extractedLabel}`);
           break; // Only ask one at a time
@@ -724,7 +711,7 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           } else {
             warnMsg = `⚠️ Possible Duplicate Entry\n\n${displayName} ₹${newAmount.toLocaleString('en-IN')} for ${dateLabel}\n\nYou already have ${displayName} ₹${existing.toLocaleString('en-IN')} saved for this date.\nReply *haan* to save anyway · *nahi* to cancel`;
           }
-          await sendMessage(from, warnMsg);
+          await sendMessage(from, warnMsg, restaurantId);
           break;
         }
 
@@ -743,13 +730,14 @@ export async function handleTextMessage(from: string, restaurantId: string, body
           : '';
 
         await sendMessage(from,
-          `✅ ${resolution.label} ₹${(entry.amount || 0).toLocaleString('en-IN')} saved for ${formatDate(finalDate)}${costTypeLabel}`
+          `✅ ${resolution.label} ₹${(entry.amount || 0).toLocaleString('en-IN')} saved for ${formatDate(finalDate)}${costTypeLabel}`,
+          restaurantId
         );
         savedCount++;
       }
 
       if (savedCount > 1) {
-        await sendMessage(from, `✅ ${savedCount} entries saved successfully!`);
+        await sendMessage(from, `✅ ${savedCount} entries saved successfully!`, restaurantId);
       }
     }
 
@@ -773,9 +761,14 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 
     return true;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[TextHandler] Error:", error);
-    await sendMessage(from, "Sorry, something went wrong while processing your message.");
+    await sendMessage(
+      from,
+      "Sorry, something went wrong while processing your message.",
+      restaurantId,
+      String(error?.message || error).substring(0, 300)
+    );
     return true;
   }
 }
@@ -783,14 +776,5 @@ export async function handleTextMessage(from: string, restaurantId: string, body
 function formatDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata'
-  });
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to: `whatsapp:${to}`,
-    body,
   });
 }

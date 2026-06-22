@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -40,7 +41,8 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
     const restaurantName = body.trim();
 
     if (!restaurantName || restaurantName.length < 2) {
-      await sendMessage(from, "Please share your restaurant or outlet's name (e.g. \"Tea Day Munnekollal\").");
+      // No restaurant row exists yet → restaurantId is null
+      await sendMessage(from, "Please share your restaurant or outlet's name (e.g. \"Tea Day Munnekollal\").", null);
       return true;
     }
 
@@ -51,7 +53,7 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
       .join(' ');
 
     // Create the restaurant — self-activated immediately
-    const { error: insertError } = await supabase
+    const { data: newRestaurant, error: insertError } = await supabase
       .from('restaurants')
       .insert({
         mobile: from,
@@ -61,11 +63,13 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
         activated_by: 'self_onboarding',
         activated_at: new Date().toISOString(),
         onboarded_at: new Date().toISOString(),
-      });
+      })
+      .select('id')
+      .single();
 
     if (insertError) {
       console.error('[Onboarding] Insert failed:', insertError);
-      await sendMessage(from, "Something went wrong setting up your account. Please try again in a moment.");
+      await sendMessage(from, "Something went wrong setting up your account. Please try again in a moment.", null);
       return true;
     }
 
@@ -75,6 +79,8 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
       .delete()
       .eq('whatsapp_number', from);
 
+    // FIX: restaurant now exists (newRestaurant.id) — pass it so this
+    // welcome message is correctly attributed in the conversation log.
     await sendMessage(from,
       `✅ Welcome to Hisaab AI, ${cleanName}! 🎉\n\n` +
       `You're all set up. Here's how to get started:\n\n` +
@@ -86,7 +92,8 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
       `   Just send the photo or PDF\n\n` +
       `📊 *Check your P&L:*\n` +
       `   "P&L for this month"\n\n` +
-      `Try sending today's sales now!`
+      `Try sending today's sales now!`,
+      newRestaurant?.id || null
     );
     return true;
   }
@@ -104,22 +111,12 @@ export async function handleOnboarding(from: string, body: string): Promise<bool
     console.error('[Onboarding] Failed to create pending step:', createPendingError);
   }
 
+  // No restaurant row exists yet → restaurantId is null
   await sendMessage(from,
     `👋 Welcome to *Hisaab AI*!\n\n` +
     `I'm your restaurant's AI finance assistant — track sales, expenses, and P&L right here on WhatsApp.\n\n` +
-    `Let's get you set up. *What's your restaurant or outlet's name?*`
+    `Let's get you set up. *What's your restaurant or outlet's name?*`,
+    null
   );
   return true;
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to: `whatsapp:${to}`,
-    body,
-  });
 }

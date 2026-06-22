@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { dataService } from '../../../../lib/db/dataService';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -57,7 +58,8 @@ export async function handleDelete(from: string, restaurantId: string, body: str
 
   if (!category) {
     await sendMessage(from,
-      'Which category to delete? e.g.\n• *hata do milk*\n• *delete water*\n• *phonepe hatao*'
+      'Which category to delete? e.g.\n• *hata do milk*\n• *delete water*\n• *phonepe hatao*',
+      restaurantId
     );
     return;
   }
@@ -76,7 +78,7 @@ export async function handleDelete(from: string, restaurantId: string, body: str
     const amount = data ? Number((data as any)[category] || 0) : 0;
 
     if (!amount) {
-      await sendMessage(from, `No ${category} entry found for ${formatDate(date)}.`);
+      await sendMessage(from, `No ${category} entry found for ${formatDate(date)}.`, restaurantId);
       return;
     }
 
@@ -87,7 +89,8 @@ export async function handleDelete(from: string, restaurantId: string, body: str
     }, 'confirm_delete');
 
     await sendMessage(from,
-      `🗑️ *${category} ₹${amount.toLocaleString('en-IN')} for ${formatDate(date)}*\n\nDelete? Reply *haan* · *nahi*`
+      `🗑️ *${category} ₹${amount.toLocaleString('en-IN')} for ${formatDate(date)}*\n\nDelete? Reply *haan* · *nahi*`,
+      restaurantId
     );
     return;
   }
@@ -104,7 +107,7 @@ export async function handleDelete(from: string, restaurantId: string, body: str
   const rows = (rawRows || []) as any[];
 
   if (rows.length === 0) {
-    await sendMessage(from, `No ${category} entries found to delete.`);
+    await sendMessage(from, `No ${category} entries found to delete.`, restaurantId);
     return;
   }
 
@@ -124,18 +127,7 @@ export async function handleDelete(from: string, restaurantId: string, body: str
   }, 'delete_pick');
 
   await sendMessage(from,
-    `Which *${category}* entry to delete?\n\n${lines.join('\n')}\n\nReply 1, 2 or 3`
+    `Which *${category}* entry to delete?\n\n${lines.join('\n')}\n\nReply 1, 2 or 3`,
+    restaurantId
   );
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to:   `whatsapp:${to}`,
-    body,
-  });
 }

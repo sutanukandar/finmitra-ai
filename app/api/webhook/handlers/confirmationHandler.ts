@@ -1,5 +1,6 @@
 import { dataService } from '../../../../lib/db/dataService';
 import { handleClassifyExpense } from './classifyExpenseHandler';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 export async function handleConfirmation(from: string, restaurantId: string, body: string) {
   const lowerBody = body.toLowerCase().trim();
@@ -29,7 +30,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       const option = pending?.payload?.options?.[idx];
 
       if (!option) {
-        await sendMessage(from, 'Please reply 1, 2 or 3.');
+        await sendMessage(from, 'Please reply 1, 2 or 3.', restaurantId);
         return true;
       }
 
@@ -41,7 +42,8 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
       }, 'confirm_delete');
 
       await sendMessage(from,
-        `🗑️ *${pending!.payload.category} ₹${Number(option.amount).toLocaleString('en-IN')} for ${formatDate(option.date)}*\n\nConfirm delete? Reply *haan* · *nahi*`
+        `🗑️ *${pending!.payload.category} ₹${Number(option.amount).toLocaleString('en-IN')} for ${formatDate(option.date)}*\n\nConfirm delete? Reply *haan* · *nahi*`,
+        restaurantId
       );
       return true;
     }
@@ -56,7 +58,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 
     if (isConfirm) {
       if (!pending) {
-        await sendMessage(from, "No pending action found. Please resend your bill or entry.");
+        await sendMessage(from, "No pending action found. Please resend your bill or entry.", restaurantId);
         return true;
       }
 
@@ -70,7 +72,8 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
           action: 'delete', date_affected: date, pnl_field: category, amount_reversed: amount,
         });
         await sendMessage(from,
-          `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.\n_Saved for recovery if needed._`
+          `✅ Deleted. ${category} ₹${Number(amount).toLocaleString('en-IN')} for ${formatDate(date)} removed from P&L.\n_Saved for recovery if needed._`,
+          restaurantId
         );
 
       // ── confirm_text_entry ────────────────────────────────────────────
@@ -82,7 +85,7 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
         await dataService.writeAuditLog(restaurantId, {
           action: 'duplicate_override', date_affected: date, pnl_field: category, amount_reversed: amount,
         });
-        await sendMessage(from, `✅ Saved. ${category} for ${formatDate(date)} is now ₹${newTotal}.`);
+        await sendMessage(from, `✅ Saved. ${category} for ${formatDate(date)} is now ₹${newTotal}.`, restaurantId);
 
       // ── confirm_bill ──────────────────────────────────────────────────
       } else if (action === 'confirm_bill') {
@@ -160,10 +163,11 @@ export async function handleConfirmation(from: string, restaurantId: string, bod
 `✅ Bill saved!
 
 ${parseResult.vendor || 'Bill'} ₹${foodTotal}${deliveryFee > 0 ? ` + ₹${deliveryFee} delivery` : ''} added to ${formatDate(entryDate)} P&L
-${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
+${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`,
+            restaurantId
           );
         } else {
-          await sendMessage(from, "✅ Saved! Your entry has been added to P&L.");
+          await sendMessage(from, "✅ Saved! Your entry has been added to P&L.", restaurantId);
         }
 
       // ── confirm_replace ───────────────────────────────────────────────
@@ -175,7 +179,8 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
         });
         const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
         await sendMessage(from,
-          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
+          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`,
+          restaurantId
         );
 
       // ── confirm_reduce ────────────────────────────────────────────────
@@ -187,34 +192,40 @@ ${itemCount} ${itemCount === 1 ? 'item' : 'items'} saved to purchase history`
         });
         const displayCat = (category as string).charAt(0).toUpperCase() + (category as string).slice(1);
         await sendMessage(from,
-          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`
+          `✅ Corrected. ${displayCat} for ${formatDate(date)} updated to ₹${Number(new_amount).toLocaleString('en-IN')}.`,
+          restaurantId
         );
 
       } else {
-        await sendMessage(from, "✅ Done!");
+        await sendMessage(from, "✅ Done!", restaurantId);
       }
 
     } else {
       // ── nahi / cancel ─────────────────────────────────────────────────
       if (action === 'confirm_delete') {
-        await sendMessage(from, "Cancelled. Nothing was deleted.");
+        await sendMessage(from, "Cancelled. Nothing was deleted.", restaurantId);
       } else if (action === 'confirm_text_entry') {
-        await sendMessage(from, "Cancelled. Nothing was saved.");
+        await sendMessage(from, "Cancelled. Nothing was saved.", restaurantId);
       } else if (action === 'confirm_replace' || action === 'confirm_reduce') {
-        await sendMessage(from, "Cancelled. Nothing was changed.");
+        await sendMessage(from, "Cancelled. Nothing was changed.", restaurantId);
       } else if (action === 'classify_expense') {
-        await sendMessage(from, "Cancelled. Entry was not saved.");
+        await sendMessage(from, "Cancelled. Entry was not saved.", restaurantId);
       } else {
-        await sendMessage(from, "Cancelled. Bill was not saved.");
+        await sendMessage(from, "Cancelled. Bill was not saved.", restaurantId);
       }
     }
 
     await dataService.deletePendingConfirmation(restaurantId);
     return true;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[ConfirmationHandler] Error:", error);
-    await sendMessage(from, "Sorry, something went wrong while saving.");
+    await sendMessage(
+      from,
+      "Sorry, something went wrong while saving.",
+      restaurantId,
+      String(error?.message || error).substring(0, 300)
+    );
     return true;
   }
 }
@@ -242,17 +253,5 @@ function formatDate(isoDate: string): string {
   if (!isoDate) return 'that date';
   return new Date(isoDate + 'T00:00:00').toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata'
-  });
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER as string,
-    to:   `whatsapp:${to}`,
-    body,
   });
 }
