@@ -1,13 +1,14 @@
 /**
- * classifyExpenseHandler.ts
- *
- * Handles the user's "1" or "2" response to the ask-once classification question:
- *   "Is 'pest control' a fixed recurring expense or variable? Reply 1 → Fixed · 2 → Item Cost"
- *
- * Called from confirmationHandler.ts when pending action = 'classify_expense'
- */
+* classifyExpenseHandler.ts
+*
+* Handles the user's "1" or "2" response to the ask-once classification question:
+*   "Is 'pest control' a fixed recurring expense or variable? Reply 1 → Fixed · 2 → Item Cost"
+*
+* Called from confirmationHandler.ts when pending action = 'classify_expense'
+*/
 
 import { dataService } from '../../../../lib/db/dataService';
+import { sendMessage } from '../../../../lib/sendMessage';
 
 export async function handleClassifyExpense(
   from: string,
@@ -52,23 +53,17 @@ export async function handleClassifyExpense(
   const typeLabel = isFixed ? 'Fixed Cost' : 'Item Cost';
   const bucketLabel = isFixed ? 'Fixed' : 'Item';
 
+  // FIX: was hardcoded to the Twilio SANDBOX number ('whatsapp:+14155238886')
+  // instead of the production number — message was sent to a different
+  // Twilio conversation thread that never reaches the restaurant owner.
+  // Now uses the shared sendMessage util (production number + auto-logged
+  // to the messages table for the admin Conversations tab).
   await sendMessage(from,
     `✅ ${payload.displayLabel} ₹${payload.amount.toLocaleString('en-IN')} saved as ${typeLabel}.\n\n` +
-    `I'll remember this — all future "${payload.categoryName}" entries will go to ${bucketLabel} Cost automatically.`
+    `I'll remember this — all future "${payload.categoryName}" entries will go to ${bucketLabel} Cost automatically.`,
+    restaurantId
   );
 
   console.log(`[ClassifyExpenseHandler] Saved: ${payload.categoryName} → ${costType} (${pnlBucket}) for restaurant ${restaurantId}`);
   return true;
-}
-
-async function sendMessage(to: string, body: string) {
-  const twilio = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-  await twilio.messages.create({
-    from: 'whatsapp:+14155238886',
-    to: `whatsapp:${to}`,
-    body,
-  });
 }
